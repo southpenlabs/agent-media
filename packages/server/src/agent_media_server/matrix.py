@@ -185,6 +185,9 @@ class Room:
         self._retired: dict[str, dict[str, str]] = {}
         self._cut: float | None = None
         self._linked: frozenset = frozenset()
+        # Messages of this chat's twin on the phone (twins.py, §6.61 "One
+        # history"), shown below this room's start: read-only here.
+        self._foreign: set[str] = set()
         # The message the owner's last read receipt was on (`read`, §6.32):
         # the same one is not told twice.
         self.read_sent = ""
@@ -319,7 +322,7 @@ class Room:
             return bool(evs) or self.more()
 
     def _closed_refusal(self, ev_id: str) -> dict | None:
-        if ev_id in self._closed_ids:
+        if ev_id in self._closed_ids or ev_id in self._foreign:
             return {"error": "that message is in an earlier chat the bridge closed: "
                              "it can be read, not changed or answered", "status": 409}
         return None
@@ -343,6 +346,8 @@ class Room:
         content = dict(content)
         if reply_to:
             with self.lock:
+                if reply_to in self._foreign:
+                    return False, self._closed_refusal(reply_to) or {}
                 if reply_to not in self._by_id:
                     return False, {"error": "no such message in this room", "status": 404}
                 if (err := self._closed_refusal(reply_to)):
@@ -398,6 +403,8 @@ class Room:
             return False, {"error": "this Matrix room is read-only: no owner token "
                                     "(run matrix-owner-login)", "status": 409}
         with self.lock:
+            if ev_id in self._foreign:
+                ev_id = ""           # the twin's copy: the newest here
             if ev_id and ev_id not in self._by_id:
                 return False, {"error": "no such message in this room", "status": 404}
             if ev_id in self._closed_ids:
@@ -428,6 +435,8 @@ class Room:
             return "", {"error": "this Matrix room is read-only: no owner token "
                                  "(run matrix-owner-login)", "status": 409}
         with self.lock:
+            if ev_id in self._foreign:
+                return "", self._closed_refusal(ev_id) or {}
             m = self._by_id.get(ev_id)
             if m is None:
                 return "", {"error": "no such message in this room", "status": 404}
@@ -486,6 +495,8 @@ class Room:
             return False, {"error": "this Matrix room is read-only: no owner token "
                                     "(run matrix-owner-login)", "status": 409}
         with self.lock:
+            if ev_id in self._foreign:
+                return False, self._closed_refusal(ev_id) or {}
             if ev_id not in self._by_id:
                 return False, {"error": "no such message in this room", "status": 404}
             if (err := self._closed_refusal(ev_id)):

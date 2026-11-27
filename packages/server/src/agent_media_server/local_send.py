@@ -246,6 +246,10 @@ def send(body, bearer: str, now: float | None = None,
     if rec is None:
         return False, {"error": "no such chat: a phone has not listed it", "status": 404,
                        "code": "not_found"}
+    from . import twins
+
+    if reply_to and twins.foreign(chat, reply_to):
+        return False, dict(twins.READ_ONLY)
     if rec.get("gone"):
         return False, {"error": "the phone no longer lists this chat", "status": 409,
                        "code": "chat_gone"}

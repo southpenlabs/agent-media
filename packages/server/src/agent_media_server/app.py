@@ -518,7 +518,7 @@ CORS_PATHS = frozenset({
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/services", "/settings/people", "/settings/mail", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/usage/plans", "/usage/credits", "/rename", "/session/quiet", "/session/mute", "/session/remind", "/session/issue",
     "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
-    "/local/avatar", "/local/avatars", "/local/send", "/local/outbox", "/local/outbox/result",
+    "/local/avatar", "/local/avatars", "/local/media", "/local/media/missing", "/local/send", "/local/outbox", "/local/outbox/result",
     "/local/agents",
     "/session/rewind", "/session/rewind/answer", "/session/rewind/cancel",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -776,7 +776,7 @@ def body_limit(path: str) -> int:
         from . import local_messages
 
         return local_messages.MAX_AVATAR_BYTES  # a Local chat sender's picture (Full copy)
-    if path == "/local/backup":
+    if path in ("/local/backup", "/local/media"):
         # Past the guard: the route checks the bearer first, then refuses a
         # body over local_backup.max_bytes() unread, as JSON (§6.61 Backup).
         return 1 << 40
@@ -2895,6 +2895,28 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = local_send.outbox((parse_qs(query).get("chat") or [""])[0], _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/local/media/missing":
+        # A Local chat's media messages whose bytes are not here yet (local_media.py).
+        from . import local_media
+
+        ok, detail = local_media.missing((parse_qs(query).get("chat") or [""])[0], _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/local/media":
+        # One Full copy message's media bytes, like any attachment; Range
+        # honoured; `?access_token=` for an <img> or <video>.
+        from . import local_media
+
+        q = parse_qs(query)
+        bearer = _bearer(h)
+        if not bearer:
+            bearer = ((q.get("access_token") or [""])[0]).strip()
+            auth.set_request_bearer(bearer)
+        ok, detail = local_media.open_media((q.get("chat") or [""])[0],
+                                            (q.get("event") or [""])[0], bearer)
+        if not ok:
+            _json(h, detail.pop("status", 404), {"ok": False, **detail})
+            return True
+        _send_file(h, detail["file"], detail["size"], detail["type"])
     elif path == "/local/backups":
         # The Local chats backups the caller may see (local_backup.py, §6.61).
         from . import local_backup
@@ -5604,6 +5626,20 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         else:
             ok, detail = room_edit.session_unsend(str(body.get("session") or ""),
                                                   str(body.get("id") or ""), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/local/media":
+        # A Full copy message's media bytes, sent once when its account moves
+        # to the server, streamed to disk (local_media.py, §6.61 Media bytes).
+        from . import local_media
+
+        try:
+            length = int(h.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        ok, detail, was_read = local_media.save(
+            h.rfile, length, parse_qs(h.path.partition("?")[2]), h.headers, _bearer(h))
+        if not was_read:
+            h.close_connection = True      # refused first: the body is left unread
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/local/backup":
         # A Local chats backup from the phone's companion: ciphertext,

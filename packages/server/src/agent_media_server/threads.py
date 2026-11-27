@@ -877,8 +877,16 @@ def session_log(session: str, *, limit=None, before: str = "",
 
         if not local_chats.known(session):
             return False, {"error": "no such chat: a phone has not listed it", "status": 404}
-        return True, local_messages.envelope(session, limit=_limit(limit), before=before,
-                                             around=around, most=MESSAGES_MAX)
+        from . import twins
+
+        out = local_messages.envelope(session, limit=_limit(limit), before=before,
+                                      around=around, most=MESSAGES_MAX)
+        # Read on into the twin room's older history (twins.py, §6.61 "One history").
+        try:
+            out = twins.local_envelope(session, out, limit=_limit(limit), before=before)
+        except Exception as _exc:  # noqa: BLE001 — the chat reads as it is
+            _failures.swallowed(_exc)
+        return True, out
     if quick.has(session):
         # A quick chat (quick.py): its messages, nothing of a session's.
         return True, quick.envelope(session, limit=_limit(limit), before=before)
@@ -886,8 +894,16 @@ def session_log(session: str, *, limit=None, before: str = "",
     if room is not None:
         # A Matrix room (matrix.py): its timeline, and none of a session's
         # speech, turn or manifest.
-        return True, matrix.envelope(room, limit=_limit(limit), before=before,
-                                     around=around, most=MESSAGES_MAX)
+        from . import twins
+
+        out = matrix.envelope(room, limit=_limit(limit), before=before,
+                              around=around, most=MESSAGES_MAX)
+        # Read on into the phone's copy of the same chat (twins.py, §6.61 "One history").
+        try:
+            out = twins.room_envelope(room, out, limit=_limit(limit), before=before)
+        except Exception as _exc:  # noqa: BLE001 — the room reads as it is
+            _failures.swallowed(_exc)
+        return True, out
     try:
         from agent_media_core import book_tracks
 

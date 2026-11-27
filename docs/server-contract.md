@@ -14977,6 +14977,86 @@ POST /local/messages {"chat": "local:<network>:<id>", "messages": [<in>…]}    
   listed at all (checked when a phone posts a full list or messages).
 - `/features` `local_full: true`.
 
+#### One history: a moved account's chat reads on into its other copy (built 28 Nov 2026)
+
+David, 28 Nov 2026 (sasonica-app mail #1416): "Ask agent-media to stitch
+history". One account bridged on both sides (Homes, above) has two copies of
+each chat, and a new sign-in holds only what the network backfills (Google
+Messages: about 50 messages a chat), so a chat whose account moved looked cut
+short. Each copy's log now reads on past its own first message into the
+other's, in the shape of the retired login's merge (§6.25 "One
+transcript"). Code: `agent_media_server/twins.py`.
+
+- **Twins** are paired by the server as the app pairs rows: a Matrix room's
+  `network.service` and `network.chat` (§6.1) name the Local id
+  `local:<service>:<chat>`, once a phone has listed it. Nothing to pair
+  without the bridges add-on (no `service`).
+- **A room** (`GET /conversation/log`, the thread's history, `before`
+  paging): once all of the room is held, it goes on into its twin's Full
+  copy messages (above; none unless the dial is at `full`) older than the
+  room's first message.
+- **A Local chat**: once its held messages are read, it goes on into its
+  twin room's history older than its own first message (paging the room
+  back as needed).
+- The other copy's messages carry `earlier: "<its session>"` (the Local id,
+  or the room's thread). In a one-to-one chat the other copy's person reads
+  as this copy's (the room's member, with picture and card; the Local
+  chat's sender as its newest message names them); in a group the other
+  copy's names stay. The owner's are `user` as always. They are read-only
+  here: replying, editing or reacting to one is 409 (the room's closed-portal
+  refusal; `POST /local/send` `code: "other_copy"`); a read receipt on one
+  marks the newest message here.
+- The log answers `twin: "<the other copy's session>"` when it read into it.
+- **Homes**: both directions are read whatever `homes` says, so changing a
+  home moves nothing and loses nothing: the new home's chat reads on into
+  the old one's. A search jump (`around`) answers its own copy only.
+
+#### Media bytes: a moved chat's photos and files, sent once (built 28 Nov 2026)
+
+David, 28 Nov 2026 (sasonica-app mail #1417): copy the files when an
+account moves from the phone to the server, once, not day to day. Full copy
+keeps a message's media as `{name, mime, size}` ("photo — on the phone");
+on a home change from phone to host (Homes, above) the app sends each media
+message's bytes, chat by chat, newest first. Code:
+`agent_media_server/local_media.py`.
+
+```
+POST /local/media?chat=local:<network>:<id>&event=<event id>
+     Content-Type: <the file's type>, Content-Length required; body = the bytes
+  → {"ok": true, "chat", "event", "size", "type", "url"}
+GET /local/media?chat=&event=[&access_token=]   → the bytes, Range as /upload
+GET /local/media/missing?chat=
+  → {"ok": true, "chat", "missing": [{"event", "kind", "size"}…], "limit": <bytes>}
+```
+
+- **Who sends**: as `POST /local/messages` and `/local/avatar`: the device
+  that bridges the chat (403 `code: "not_bridging"` for another, 403
+  `guest`, 401 with no bearer), while the dial is at `full` (409
+  `not_enabled`). The message must be held here (404 `not_found`), be a
+  photo, video, sound or file (409 `no_media`) and not deleted (409
+  `deleted`). Sending again replaces it.
+- **Size limit**: `MEDIA_LOCAL_MEDIA_MAX_MB`, default 100 MB a file.
+  Larger is 413 `code: "too_big"`, `limit` in bytes, answered from the
+  header with the body left unread and the connection closed; no
+  Content-Length is 411; a body shorter than it said is 400 `short_body`.
+  The app skips a file over `limit` (from `missing`) and says so.
+- **Kept** as files under `<state_dir>/local-media/<chat hash>/<event
+  hash>` (folders 0700, files 0600, written whole before they replace
+  anything), the type beside them. They go with their messages: the dial
+  leaving `full`, a chat pruned.
+- **Served**: once held, the message's media part in its log (and in its
+  twin room's stitched log, One history above) carries `url` (`/local/media?…`)
+  in place of `on_phone`, and `text` "sent a photo" (or video, file…), as
+  a room's media part. `GET` it like a room's attachment: gated as the
+  chat's log (any paired device but a guest or a folder-limited one),
+  `?access_token=` for an `<img>` or `<video>`, `Range` answered 206.
+  `Content-Type` is the sent type for a picture, video or sound, else
+  `application/octet-stream`. 404 when the bytes are not here. No
+  thumbnail route: a picture is served whole.
+- **Missing**: the chat's media messages (not deleted) whose bytes are not
+  here, newest first, with the size Full copy recorded, so a move cut short
+  resumes where it stopped; read by any device that may read the chat.
+
 #### Senders' pictures (built 22 Nov 2026)
 
 Asked by sasonica-app (mail #1189; David, 22 Nov 2026: "Ask agent-media for

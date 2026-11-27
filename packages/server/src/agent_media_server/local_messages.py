@@ -447,7 +447,16 @@ def _message(r: dict) -> dict:
 def _view(conn, chat: str, rows: list[dict]) -> list[dict]:
     from . import replies
 
+    from . import local_media
+
     msgs = [_message(r) for r in rows]
+    # Bytes the phone sent when the account moved to the server (local_media.py).
+    for r, m in zip(rows, msgs):
+        if r["kind"] in MEDIA_KINDS and not r["redacted"] and local_media.held(chat, r["id"]):
+            p = m["parts"][0]
+            p.pop("on_phone", None)
+            p["url"] = local_media.url(chat, r["id"])
+            p["text"] = f"sent {'a' if MEDIA_WORD[r['kind']][0] not in 'aeiou' else 'an'} {MEDIA_WORD[r['kind']]}"
     pics = _avatar_tags(conn, chat)
     if pics:
         for r, m in zip(rows, msgs):
@@ -635,8 +644,9 @@ def _delete(chats: list[str] | None) -> dict:
             raise
         if chats is None:
             conn.execute("VACUUM")
-    from . import local_send, search
+    from . import local_media, local_send, search
 
+    local_media.forget(None if chats is None else gone)
     if out_n:
         local_send.changed()
     for c in gone:
