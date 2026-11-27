@@ -542,3 +542,11 @@ def test_pictures_are_kept_from_the_card(on):
     on.set(COLL + "peter.vcf", PETER)
     contacts.sync_carddav()
     assert contacts.card(cid)["photo"] is None
+
+
+def test_an_empty_group_card_is_still_a_label(on):
+    # David, 27 Nov 2026: "can we also keep the empty groups?"
+    on.set(COLL + "girls.vcf", group("girls-uid", "Girls", []))
+    _synced(on)
+    got = {lb["name"]: lb["count"] for lb in contacts.labels()["labels"]}
+    assert got.get("Girls") == 0 and got.get("Family", 0) >= 1

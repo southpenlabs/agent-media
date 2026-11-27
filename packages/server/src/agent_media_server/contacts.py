@@ -2621,7 +2621,7 @@ def card(cid: str) -> dict | None:
 
 def labels() -> dict:
     """`GET /contacts/labels`: every label on someone in the book, with how
-    many people have it, by name. Read once per pass (`agent_media_core.
+    many people have it, by name, and the address book's empty labels (0). Read once per pass (`agent_media_core.
     _pass`): a thread list asks twice, and each read parses every card."""
     from agent_media_core import _pass
 
@@ -2637,6 +2637,14 @@ def _labels_now() -> dict:
             for (raw,) in conn.execute("SELECT card FROM contacts"):
                 for x in json.loads(raw).get("labels") or []:
                     counts.setdefault(fold(x), [x, 0])[1] += 1
+            # The address book's own labels, people in them or not: an empty
+            # group card is still a label to pick (David, 27 Nov 2026: "can we
+            # also keep the empty groups?").
+            for (raw, meta) in conn.execute("SELECT card, meta FROM records WHERE kind = 'carddav-group'"):
+                g = json.loads(raw)
+                name = str(g.get("name") or "").strip()
+                if name and (json.loads(meta or "{}").get("resource") or "") not in _GOOGLE_HIDDEN:
+                    counts.setdefault(fold(name), [name, 0])
     finally:
         if conn is not None:
             conn.close()
