@@ -600,6 +600,7 @@ def test_a_row_names_the_bridge_login_it_comes_through(one_room, monkeypatch):
 
 def test_login_names_come_from_the_bridges_listing(monkeypatch):
     monkeypatch.setattr(matrix, "_ACCOUNT_NAMES", {})
+    monkeypatch.setattr(matrix, "_LIVE_LOGINS", None)
     matrix._refresh_accounts(lambda: [
         {"id": "meta", "logins": [{"id": "1", "name": "David J"},
                                   {"id": "2", "name": "", "profile": {"phone": "+61400"}},

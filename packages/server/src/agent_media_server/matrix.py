@@ -1020,6 +1020,9 @@ def _channel(state: list) -> tuple | None:
 #: Bridge logins' names, by login id (`_account_names`), and when they were
 #: last asked for (None: never).
 _ACCOUNT_NAMES: dict[str, str] = {}
+#: The logins the bridges listed as theirs at the last answer (every login,
+#: named or not); None until a listing has answered.
+_LIVE_LOGINS: set[str] | None = None
 _ACCOUNTS_AT: float | None = None
 _ACCOUNTS_LOCK = threading.Lock()
 ACCOUNTS_TTL_S = 300.0
@@ -1038,14 +1041,18 @@ def _login_name(login: dict) -> str:
 
 
 def _refresh_accounts(listing) -> None:
-    global _ACCOUNT_NAMES
+    global _ACCOUNT_NAMES, _LIVE_LOGINS
     try:
         names: dict[str, str] = {}
+        live: set[str] = set()
         for b in listing() or []:
             for lg in (b.get("logins") or []) if isinstance(b, dict) else []:
-                if isinstance(lg, dict) and lg.get("id") and _login_name(lg):
-                    names.setdefault(str(lg["id"]), _login_name(lg))
+                if isinstance(lg, dict) and lg.get("id"):
+                    live.add(str(lg["id"]))
+                    if _login_name(lg):
+                        names.setdefault(str(lg["id"]), _login_name(lg))
         _ACCOUNT_NAMES = names
+        _LIVE_LOGINS = live
     except Exception as _exc:  # noqa: BLE001 — rows name the account by id alone
         _failures.swallowed(_exc)
 
@@ -1067,17 +1074,48 @@ def _account_names(clock=time.monotonic) -> dict[str, str]:
     return _ACCOUNT_NAMES
 
 
+def retired_logins(rooms=None, live: set[str] | None = None) -> set[str]:
+    """The bridge logins that are gone: a room's receiver the bridges no
+    longer list while another room of the same network comes through one
+    they do. A phone paired again is a new login (mautrix-gmessages'
+    `gmessages_2.…` beside `gmessages_1.…`), and the old login's portals
+    stay behind as a second copy of each chat (David, 27 Nov 2026: "why
+    are there two lots of Google messages here?"). Empty until the
+    bridges' listing has answered, and a network none of whose rooms come
+    through a listed login (its bridge unreachable, say) keeps every room."""
+    live = _LIVE_LOGINS if live is None else live
+    if not live:
+        return set()
+    rooms = list(_ROOMS.values()) if rooms is None else rooms
+    by_net: dict[str, set[str]] = {}
+    for r in rooms:
+        ch = getattr(r, "channel", None)
+        rec = ch[1] if ch else ""
+        net = (getattr(r, "network", None) or {}).get("id") or ""
+        if rec and net:
+            by_net.setdefault(net, set()).add(rec)
+    out: set[str] = set()
+    for recs in by_net.values():
+        if recs & live:
+            out |= recs - live
+    return out
+
+
 def with_account(network: dict | None, channel: tuple | None,
-                 names: dict[str, str] | None = None) -> dict | None:
+                 names: dict[str, str] | None = None,
+                 retired: set[str] | None = None) -> dict | None:
     """A room's `network` naming the bridge login it comes through
-    (sasonica-app mail #1140): `account: {id, name?}`, the id the `m.bridge`
-    receiver (`_channel`), the name the login's (`_account_names`). The
-    network as it is when the room has no receiver."""
+    (sasonica-app mail #1140): `account: {id, name?, retired?}`, the id the
+    `m.bridge` receiver (`_channel`), the name the login's
+    (`_account_names`), `retired: true` for a login the bridge no longer has
+    (`retired_logins`). The network as it is when the room has no receiver."""
     receiver = channel[1] if channel else ""
     if not network or not receiver:
         return network
     name = (names if names is not None else _account_names()).get(receiver)
-    return {**network, "account": {"id": receiver, **({"name": name} if name else {})}}
+    gone = receiver in (retired if retired is not None else retired_logins())
+    return {**network, "account": {"id": receiver, **({"name": name} if name else {}),
+                                   **({"retired": True} if gone else {})}}
 
 
 def with_chat(network: dict | None, channel: tuple | None, service_of=None) -> dict | None:
@@ -1163,6 +1201,7 @@ def rows(flags: Collection[str] = frozenset()) -> list[dict]:
         flags = set(flags) - set(woke)
     out: list[dict] = []
     kept: dict[str, dict] | None = None
+    gone = retired_logins()
     for r in list(_ROOMS.values()):
         # A room not read yet is read on a thread, never in this one, and one
         # being read (its lock held) is not waited on: each read is 3–5
@@ -1193,7 +1232,7 @@ def rows(flags: Collection[str] = frozenset()) -> list[dict]:
                                       if last else None),
                             "archived": r.thread in flags, "rested": None, "pinned": False,
                             "harness": "matrix", "source": "matrix", "room": r.id,
-                            "network": with_chat(with_account(r.network, r.channel), r.channel),
+                            "network": with_chat(with_account(r.network, r.channel, retired=gone), r.channel),
                             "drivable": bool(owner_token()),
                             # When the network is told it was read (§6.32).
                             "read_receipts": read_receipts.mode_of(r.thread),

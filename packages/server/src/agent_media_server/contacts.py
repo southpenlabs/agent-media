@@ -2603,7 +2603,7 @@ def card(cid: str) -> dict | None:
             "addresses": c.get("addresses") or [], "organizations": c.get("organizations") or [],
             "websites": c.get("websites") or [], "birthday": c.get("birthday") or None,
             "notes": c.get("notes") or "", "sources": c.get("sources") or [],
-            "labels": c.get("labels") or [], "handles": c.get("handles") or [],
+            "labels": c.get("labels") or [], "handles": _live_handles(c.get("handles") or []),
             "suggestions": suggestions(cid),
             "old_addresses": c.get("old_addresses") or [],
             "mail": _card_mail(c),
@@ -3033,12 +3033,20 @@ def for_member(r, uid: str) -> dict | None:
 
 
 def rooms_of(cid: str) -> list[dict]:
-    """The Matrix rooms (sessions) that are this contact's, newest first."""
+    """The Matrix rooms (sessions) that are this contact's, newest first.
+
+    A room that came through a bridge login now gone (matrix.retired_logins:
+    the phone paired again) is not a conversation of its own: it goes under
+    the newest live room of its network as `earlier` ({session, room, at}),
+    its history there to read, and stands alone, its `network.account`
+    `retired`, only when the network has no live room with them (David,
+    27 Nov 2026: one Google Messages, not two)."""
     from . import matrix
 
     out = []
     if not is_owner():
         return out
+    gone = matrix.retired_logins()
     for r in list(matrix._ROOMS.values()):
         got = for_room(r)
         if not got or got["id"] != cid:
@@ -3046,9 +3054,53 @@ def rooms_of(cid: str) -> list[dict]:
         with r.lock:
             last = r.messages[-1]["at"] if r.messages else None
         out.append({"session": r.thread, "room": r.id, "title": r.title(),
-                    "network": r.network, "at": last})
+                    "network": matrix.with_account(r.network, r.channel, retired=gone),
+                    "at": last})
     out.sort(key=lambda x: -(x["at"] or 0))
+    return _fold_retired(out)
+
+
+def _fold_retired(rows: list[dict]) -> list[dict]:
+    """`rooms_of`'s rows with each retired login's room under the first
+    (newest) live room of its network."""
+    def retired(x):
+        return bool(((x.get("network") or {}).get("account") or {}).get("retired"))
+
+    live: dict[str, dict] = {}
+    for x in rows:
+        net = (x.get("network") or {}).get("id")
+        if net and not retired(x):
+            live.setdefault(net, x)
+    out = []
+    for x in rows:
+        home = live.get((x.get("network") or {}).get("id")) if retired(x) else None
+        if home is None:
+            out.append(x)
+        else:
+            home.setdefault("earlier", []).append(
+                {"session": x["session"], "room": x["room"], "at": x["at"]})
     return out
+
+
+def _live_handles(handles: list[dict]) -> list[dict]:
+    """A card's handles less the ghosts of a bridge login now gone: one met
+    only in rooms that came through it (`gmessages_1.19` once
+    `gmessages_2.21` is the same person's, the phone paired again). A handle
+    in no room this process holds is kept."""
+    from . import matrix
+
+    gone = matrix.retired_logins()
+    if not gone or not handles:
+        return handles
+    ids = {h.get("id") for h in handles}
+    seen: dict[str, bool] = {}
+    for r in list(matrix._ROOMS.values()):
+        with r.lock:
+            members = set(r.members)
+        old = bool(r.channel and r.channel[1] in gone)
+        for u in members & ids:
+            seen[u] = seen.get(u, True) and old
+    return [h for h in handles if not seen.get(h.get("id"), False)]
 
 
 def _reset_for_tests() -> None:

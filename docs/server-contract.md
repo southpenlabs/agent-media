@@ -550,8 +550,11 @@ Everything a message can be pointed at.
   (stable per login), `name` the login's as `GET /bridges` lists it
   (§6.26: its `name`, else the profile's email, phone or user name), asked
   for in the background every 5 min, so absent until first answered or
-  with no bridges add-on. No `account` for a room with no receiver (an
-  older bridge); the room's `room` envelope on the log carries it too. `network.service` and `network.chat` (26 Nov 2026,
+  with no bridges add-on. `retired: true` (27 Nov 2026) on a login the
+  bridges no longer list while another room of the same network comes
+  through one they do: the old copy of a chat left by pairing again, which
+  the app may hide or fold under the live one (§6.25 `rooms`). No
+  `account` for a room with no receiver (an older bridge); the room's `room` envelope on the log carries it too. `network.service` and `network.chat` (26 Nov 2026,
   §6.61 "Homes"): the network id Sasonica's Local chats use (`meta`,
   `whatsapp`, `teams`, …), as the bridges add-on names the room's
   protocol (its `service_of`; absent with no add-on, or a protocol it does
@@ -8858,7 +8861,16 @@ hold (and for any path that is not a uuid, as an unknown route).
   the kept records at the next sync (`CARDS_VERSION`), nothing read again.
 - **`rooms`**: the Matrix rooms (§6.1 "Matrix rows") that are this
   person's, newest message first: `session` is the room's thread id, so
-  every session route takes it; `at` its last message, or `null`.
+  every session route takes it; `at` its last message, or `null`;
+  `network` as on its row, with `account`. A room that came through a
+  bridge login the bridges no longer list, while another room of that
+  network comes through one they do (27 Nov 2026: the phone paired with
+  Google Messages again, so login 1's portals stayed beside login 2's), is
+  not a row of its own: it is in `earlier` (`[{session, room, at}]`) on
+  the newest live room of its network, its history there to read; with no
+  live room of that network with them it stays a row, its
+  `network.account.retired` true. `handles` leaves out a ghost met only
+  in such rooms (`@gmessages_1.19` beside `@gmessages_2.21`).
 - **Edits are not here yet.** When they come (the proposal's step 4) they
   will go through the phone's provider — a content update on the person's
   `com.google` raw contact, which Android then syncs to Google — with the
