@@ -205,6 +205,9 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # gate sets its own.
     monkeypatch.setenv("MEDIA_PLAY_GATE_CMD", "-")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    # The spam filter's CAS lookup (spam.py): never from a test, whatever
+    # the real secrets.env holds. A test of it sets its own.
+    monkeypatch.setenv("CAS_API_KEY", "-")
     # A session on another host (sessiond_remote.py, roadmap 56) is reached
     # through this host's real canvas and its token: never from a test, which
     # would start or message a session on red2. Its replies are never spoken

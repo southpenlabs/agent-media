@@ -15595,6 +15595,37 @@ The Media tab's Videos (docs/proposals/2026-11-25-videos-tab.md, step 1; David, 
   3.0", "Public domain"). `host` is a PeerTube video's instance; `count` a playlist's
   length.
 
+### 6.71 Likely spam in group chats — gated (built 28 Nov 2026)
+
+David, 28 Nov 2026, after Chinese ads came into a Telegram group as shared
+locations with made-up Arctic coordinates: "let's keep the fix and add spam
+filtering" (auto-flag plus marks, and the CAS list). Code: server `spam.py`;
+tests in `test_spam.py`.
+
+- A message in a room's log (§6.2.2) from someone else may carry
+  `spam: {"reason", "marked"?: true}`: likely spam. `reason` is `marked`
+  (David marked the sender), or, in a group only: `location` (a shared
+  location whose place name carries a web address or @handle, or is long),
+  `bot_pings` (two or more @…bot mentions and next to nothing else), `cas`
+  (a Telegram sender on the CAS list), `first_post` (a web address or
+  @handle in the first message held from someone who joined less than three
+  days before it). The app folds such a message under a "Likely spam" line
+  with a way to show it, and offers "Not spam" / "Mark as spam" for its
+  sender. Judged as the log is served, so a mark counts at once.
+- A flagged message is not read out or held for a Play, not told as a
+  `rooms` notice (§6.13), does not wake an archived chat (§6.4), is not
+  handed to a delegated agent (§6.53); the chat list's preview line reads
+  `<name>: Likely spam`.
+- `POST /session/spam {"session", "sender", "spam": true | false | null}` →
+  `{ok, session, sender, spam}`: mark a member of that chat as spam (every
+  message of theirs, in every chat, flagged `marked`), as not spam (never
+  flagged), or neither (`null`, back to the rules). 400 for a bad id or
+  value, 404 for a chat or member unknown (David himself included).
+- CAS: with `CAS_API_KEY` (the Combot API key of a Telegram account; env or
+  secrets.env; `-` off) a Telegram sender's numeric id is asked of
+  `api.cas.chat/check` once, off the sync thread; a listed id is kept for
+  good, a clear one a week. Nothing else leaves the server.
+
 ## 11. v1: the per-thread stream — BUILT 22 Sep 2026
 
 Code: `packages/server/src/agent_media_server/thread_events.py`, routed in

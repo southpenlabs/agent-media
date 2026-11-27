@@ -196,7 +196,7 @@ def _process_event(ev: dict, *, room_id: str, sam_id: str,
                    sink: SinkSpeech, music: SinkMusic,
                    coordinator: Coordinator, state: StateStore,
                    target: Target, owner: str = "",
-                   name_of=None) -> bool:
+                   name_of=None, skip=None) -> bool:
     """Returns True if the event was handled (so caller marks it seen).
 
     The owner's own words are a command or nothing. Anyone else's text or
@@ -219,6 +219,8 @@ def _process_event(ev: dict, *, room_id: str, sam_id: str,
     ts = (ev.get("origin_server_ts") or 0) / 1000
     if ts and time.time() - ts > _STALE_S:
         return False
+    if skip is not None and skip(room_id, ev):
+        return True                      # likely spam (the server's spam.py): not read out or kept
     thread = matrix.thread_of(room_id)
     decision = _decide(thread)
     extras = {"session": thread, "matrix_event": ev.get("event_id") or "",
@@ -248,7 +250,7 @@ def _csv(value: str | None) -> set[str]:
 
 
 def consumer(config: matrix.Config, env: dict | None = None, *, name_of=None,
-             commands: bool = True):
+             commands: bool = True, skip=None):
     """The speech intake as a reader of a shared sync loop.
 
     Returns `(on_event, stop)`: `on_event(room_id, event)` only queues, so
@@ -256,7 +258,8 @@ def consumer(config: matrix.Config, env: dict | None = None, *, name_of=None,
     plays them in order. Sinks are made lazily, on the worker. `name_of(room,
     user)` is a member's display name, when the caller knows it. `commands`
     off: no word is a speech control (a bridged room, where "stop" is
-    something said to a person). With no `MATRIX_SPEECH_ROOMS`, every room
+    something said to a person). `skip(room, event)` True: someone's
+    message is left alone (the server's spam filter). With no `MATRIX_SPEECH_ROOMS`, every room
     in `config.rooms` speaks — read each time, as rooms are added to it."""
     env = os.environ if env is None else env
     sam_id = env.get("MATRIX_SAM_ID", "@agent:example.org")
@@ -290,6 +293,7 @@ def consumer(config: matrix.Config, env: dict | None = None, *, name_of=None,
                     homeserver=config.homeserver, token=config.token,
                     sink=sink, music=music, coordinator=coordinator,
                     state=state, target=target, owner=owner, name_of=name_of,
+                    skip=skip,
                 )
             except Exception as e:  # noqa: BLE001
                 log.warning("matrix: event handler failed: %s", e)

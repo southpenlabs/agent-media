@@ -155,6 +155,10 @@ except /pair, which is how a device gets its token):
                   notifications off (none told, the phone posts none), until
                   then or turned off; rows carry `muted: {until}|false`
                   (mute.py)
+  POST /session/spam {"session", "sender", "spam": true|false|null} → a
+                  chat member marked as spam (folded, never spoken or told),
+                  not spam, or back to the rules; a log message carries
+                  `spam: {reason, marked?}` (spam.py)
   POST /session/remind {"session", "at": epoch|null|false, "held"?} → bring a
                   thread back as unread at a time (the opposite of quiet): held
                   down until then, then unread, in Home's replies and told to
@@ -511,7 +515,7 @@ CORS_PATHS = frozenset({
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft", "/drafts/saved", "/drafts/saved/delete",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/spaces/suggestion", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
     "/session/stop", "/session/release", "/session/run-now", "/sessions/slots", "/session/thinking-speech", "/session/voice",
-    "/session/retract", "/session/react", "/session/branch", "/session/convert", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
+    "/session/retract", "/session/react", "/session/branch", "/session/convert", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/spam", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/files", "/files/read", "/files/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent", "/voice/tidy/draft",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/music/next", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
@@ -5566,6 +5570,14 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not ok:
             log.warning(f"retract: refused ({detail.get('error')}) for "
                   f"{str(body.get('session'))[:8]}")
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/spam":
+        # A chat member marked as spam, not spam, or neither
+        # (server-contract.md §6.71, spam.py).
+        from . import spam
+
+        body = _read_json(h) or {}
+        ok, detail = spam.session_spam(str(body.get("session") or ""), body, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/session/group", "/session/leave"):
         # A group chat renamed or left (server-contract.md §6.41, room_group.py).

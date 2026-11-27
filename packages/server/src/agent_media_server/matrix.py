@@ -37,7 +37,7 @@ from collections.abc import Collection
 from agent_media_core import failures as _failures
 from agent_media_core import matrix
 
-from . import read_receipts, replies, voice_notes
+from . import read_receipts, replies, spam, voice_notes
 
 log = logging.getLogger("agent-media.server.matrix")
 
@@ -117,15 +117,21 @@ _GEO = re.compile(r"geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)")
 _COORDS = re.compile(r"\s*\(?-?\d+(?:\.\d+)?°\s*[NS],\s*-?\d+(?:\.\d+)?°\s*[EW]\)?\s*$")
 
 
+def _location_name(body: str) -> str:
+    """A shared location's place name from its `body`, without the maps
+    link, bracketed coordinates or "Location:" label a bridge adds."""
+    lines = [ln for ln in body.splitlines()
+             if ln.strip() and not re.match(r"\s*https?://", ln)]
+    name = _COORDS.sub("", "\n".join(lines)).strip()
+    return re.sub(r"^(location|shared location)\s*:?\s*", "", name, flags=re.I).strip()
+
+
 def _location_text(content: dict, body: str) -> str:
     """A shared location (`m.location`) in words: the place's name, which a
     bridge puts in `body` (a Telegram venue's title and address) with its
     coordinates and a maps link after, and a link to the point from
     `geo_uri`. 28 Nov 2026: "shared a location" alone dropped both."""
-    lines = [ln for ln in body.splitlines()
-             if ln.strip() and not re.match(r"\s*https?://", ln)]
-    name = _COORDS.sub("", "\n".join(lines)).strip()
-    name = re.sub(r"^(location|shared location)\s*:?\s*", "", name, flags=re.I).strip()
+    name = _location_name(body)
     text = f"_shared a location_\n{name[:2000]}" if name else "_shared a location_"
     m = _GEO.match(str(content.get("geo_uri") or ""))
     if m:
@@ -167,6 +173,9 @@ class Room:
         # before this room's start (`_pending`, `closed`).
         self.channel: tuple | None = None
         self.members: dict[str, str] = {}
+        # When each member joined (epoch s), from the room's state and the
+        # sync: a newcomer's first post with a link is likely spam (spam.py).
+        self.joined_at: dict[str, float] = {}
         # Pictures (20 Oct 2026): the room's own `m.room.avatar` and each
         # member's, as mxc URLs ("" for none); served by /rooms/<thread>/avatar.
         self.avatar = ""
@@ -256,6 +265,11 @@ class Room:
                 self.network = _network(state)
                 self.avatar = _room_avatar(state)
                 self.channel = _channel(state)
+                self.joined_at = {e.get("state_key") or "": (e.get("origin_server_ts") or 0) / 1000
+                                  for e in state if isinstance(e, dict)
+                                  and e.get("type") == "m.room.member"
+                                  and (e.get("content") or {}).get("membership") == "join"
+                                  and e.get("origin_server_ts")}
             except (urllib.error.URLError, OSError, ValueError):
                 pass                 # no service named: listed with the plain rooms
             got = self._page(None)
@@ -604,6 +618,8 @@ class Room:
             uid = ev.get("state_key") or ""
             # Going back, a member event is an old name: the joined list wins.
             if not front and content.get("membership") == "join":
+                if uid not in self.members and ev.get("origin_server_ts"):
+                    self.joined_at[uid] = ev["origin_server_ts"] / 1000
                 self.members[uid] = content.get("displayname") or uid
                 if _mxc(content.get("avatar_url")):
                     self.avatars[uid] = content["avatar_url"]
@@ -652,6 +668,7 @@ class Room:
             new = content.get("m.new_content") or {}
             if m is not None and new:
                 m["parts"] = self._parts(ev.get("sender") or "", new, rel["event_id"])
+                m["_sig"] = spam.signals(new)
                 m["edited"] = True
                 self.rev += 1
             elif new and not front and rel.get("event_id"):
@@ -735,7 +752,9 @@ class Room:
              "parts": self._parts(sender, content, ev.get("event_id") or ""),
              "spoken": None, "turn": {"running": False},
              # A room can have more than two people in it: who said it.
-             "sender": {"id": sender, "name": self.members.get(sender) or sender}}
+             "sender": {"id": sender, "name": self.members.get(sender) or sender},
+             # What its words say for the spam rules (spam.signals); never served.
+             "_sig": spam.signals(content)}
         rel = content.get("m.relates_to")
         target = ((rel or {}).get("m.in_reply_to") or {}).get("event_id") \
             if isinstance(rel, dict) and isinstance(rel.get("m.in_reply_to"), dict) else ""
@@ -860,6 +879,16 @@ class Room:
                  "by": [self.members.get(u) or u for u in by]}
                 for k, by in self.reactions.get(ev_id, {}).items() if by]
 
+    def spam_of(self, m: dict) -> dict | None:
+        """The spam verdict on one held message (spam.verdict)."""
+        sig = m.get("_sig")
+        if m.get("role") != "assistant" or sig is None:
+            return None
+        uid = m["sender"]["id"]
+        first = min((x["at"] for x in self.messages if x["sender"]["id"] == uid), default=None)
+        return spam.verdict(self, uid, tuple(sig), m["at"],
+                            first if first is not None and first < m["at"] else None)
+
     def _view(self, msgs: list[dict]) -> list[dict]:
         # An older voice note the first time its page is read (§6.37).
         for m in msgs:
@@ -868,6 +897,20 @@ class Room:
                         and "transcript" not in p and m["id"] in self.media:
                     voice_notes.want(self, m["id"])
         out = [dict(m, sender=dict(m["sender"])) for m in msgs]
+        # Likely spam (spam.py, §6.71): judged as served, so a mark made
+        # since counts. A sender's first message is the first held.
+        first: dict[str, float] = {}
+        for m in self.messages:
+            first.setdefault(m["sender"]["id"], m["at"])
+        for m in out:
+            sig = m.pop("_sig", None)
+            if m["role"] == "assistant" and sig is not None:
+                uid = m["sender"]["id"]
+                f = first.get(uid)
+                v = spam.verdict(self, uid, tuple(sig), m["at"],
+                                 f if f is not None and f < m["at"] else None)
+                if v:
+                    m["spam"] = v
         who: dict[str, dict] = {}
         # Who has read the owner's messages (§6.35): every other person whose
         # receipt is on that message or a later one — not the owner, not the
@@ -1304,6 +1347,8 @@ def rows(flags: Collection[str] = frozenset()) -> list[dict]:
                 text = ""
                 if last:
                     text = " ".join(p.get("text") or "" for p in last["parts"]).strip()
+                    if r.spam_of(last):
+                        text = spam.PREVIEW
                     if last["role"] == "assistant":
                         text = f"{last['sender']['name']}: {text}"
                 out.append({"session": r.thread, "title": r.title(), "live": False,
@@ -1538,12 +1583,22 @@ def _name_of(room_id: str, user: str) -> str:
     return (r.members.get(user) or "") if r is not None else ""
 
 
+def _spam_skip(room_id: str, ev: dict) -> bool:
+    """For the speech intake, on its own worker: True when a message is
+    likely spam and is not to be read out or held (spam.py). Waits a
+    moment for a CAS answer, which the sync thread never does."""
+    r = _ROOMS.get(thread_of(room_id))
+    return r is not None and spam.of_event(r, ev, cas_wait=spam.CAS_WAIT_S) is not None
+
+
 def _on_event(room_id: str, ev: dict) -> None:
     # Taken even before the room's first read: that read puts its page in
     # front, and a message in both is kept once.
     r = _ROOMS.get(thread_of(room_id))
     if r is not None:
         r.on_event(ev)
+        if spam.of_event(r, ev):
+            return                 # likely spam: no wake, notice or agent (spam.py)
         # Someone writing in an archived chat brings it back, unless it is
         # quiet (archive_wake.py, §6.4).
         from . import archive_wake, room_notices
@@ -1608,7 +1663,7 @@ class _Owner:
                                 on_leave=self._left)
         self._not_bridge: set[str] = set()
         if intake is not None:
-            on_event, _stop = intake.consumer(self.config, name_of=_name_of, commands=False)
+            on_event, _stop = intake.consumer(self.config, name_of=_name_of, commands=False, skip=_spam_skip)
             self.sync.subscribe(on_event)
         self.sync.subscribe(_on_event)
 
@@ -1852,7 +1907,7 @@ def start() -> None:
 
     contacts_level.register()
     if intake is not None:
-        on_event, _stop = intake.consumer(config, name_of=_name_of)
+        on_event, _stop = intake.consumer(config, name_of=_name_of, skip=_spam_skip)
         s.subscribe(on_event)
     s.subscribe(_on_event)
     _SYNC[0] = s
