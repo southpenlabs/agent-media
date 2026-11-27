@@ -176,6 +176,15 @@ class Room:
         self._pending: list[str] = []
         self._from = room_id
         self._closed_ids: set[str] = set()
+        # Rooms read into, ever (attach is once per room), and for a retired
+        # login's copy of this chat (`attach(retired=True)`): its senders as
+        # this room's (`_senders`, old ghost → live), and `_cuts`, the time
+        # below which it is read — what the live copy holds is not shown
+        # twice. `_cut` is the one in force for the room `back` pages.
+        self._attached: set[str] = set()
+        self._retired: dict[str, dict[str, str]] = {}
+        self._cut: float | None = None
+        self._linked: frozenset = frozenset()
         # The message the owner's last read receipt was on (`read`, §6.32):
         # the same one is not told twice.
         self.read_sent = ""
@@ -234,13 +243,24 @@ class Room:
             for old in _CLOSED.get(self.channel, []) if self.channel else []:
                 self.attach(old)
 
-    def attach(self, room_id: str) -> None:
+    def attach(self, room_id: str, retired: bool = False,
+               senders: dict[str, str] | None = None) -> None:
         """A portal the bridge closed for this room's conversation: read on
         into after this room's start, and read now when all of this room is
-        held, so a short new room shows what came before it."""
+        held, so a short new room shows what came before it.
+
+        `retired`: the copy of this chat a bridge login now gone left
+        (retired_logins; David, 27 Nov 2026: "Can we somehow merge the
+        different copies of transcripts?"). Read from where what is held
+        starts, older only (the new login's backfill overlaps it), its
+        `senders` (its ghost → this room's) as this room's people."""
         with self.lock:
-            if room_id == self.id or room_id in self._pending or room_id == self._from:
+            if room_id == self.id or room_id in self._pending or room_id == self._from \
+                    or room_id in self._attached:
                 return
+            self._attached.add(room_id)
+            if retired:
+                self._retired[room_id] = dict(senders or {})
             self._pending.append(room_id)
             _ALIAS[thread_of(room_id)] = self.thread
             if self.loaded and not self.back:
@@ -281,11 +301,21 @@ class Room:
                 return False
             if token is None:
                 self._from = self._pending.pop(0)
+                held = [m["at"] for m in self.messages if m.get("at")]
+                self._cut = (min(held) if held else None) if self._from in self._retired else None
             evs, self.back = got
+            senders = self._retired.get(room_id)
             for ev in evs:
+                if senders is not None:
+                    if self._cut is not None and \
+                            (ev.get("origin_server_ts") or 0) / 1000 >= self._cut:
+                        continue
+                    if ev.get("sender") in senders:
+                        ev = {**ev, "sender": senders[ev["sender"]]}
                 self._take(ev, front=True)
                 if room_id != self.id and ev.get("event_id") in self._by_id:
                     self._closed_ids.add(ev["event_id"])
+                    self._by_id[ev["event_id"]]["earlier"] = thread_of(room_id)
             return bool(evs) or self.more()
 
     def _closed_refusal(self, ev_id: str) -> dict | None:
@@ -1180,11 +1210,23 @@ _AT: dict[str, int] = {}
 _owner = matrix.owner_of
 
 
+#: Called with a room when it is asked for (`room`): contacts.link_retired
+#: reads a retired login's copy of the same person's chat into it. Set by
+#: the server's contacts start; none in a bare process.
+LINKERS: list = []
+
+
 def room(thread: str) -> Room | None:
     """The room behind a thread id, loaded; None when it is not a room."""
     r = _ROOMS.get(thread) or _ROOMS.get(_ALIAS.get(thread, ""))
     if r is not None and not r.loaded:
         r.load()
+    if r is not None and r.loaded:
+        for fn in LINKERS:
+            try:
+                fn(r)
+            except Exception as _exc:  # noqa: BLE001 — the room reads as it is
+                _failures.swallowed(_exc)
     return r
 
 

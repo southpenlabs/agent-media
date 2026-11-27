@@ -3082,6 +3082,53 @@ def _fold_retired(rows: list[dict]) -> list[dict]:
     return out
 
 
+def link_retired(r) -> None:
+    """Read the copies of this room's chat that a bridge login now gone left
+    (matrix.retired_logins) into it, older than what it holds (Room.attach
+    retired; David, 27 Nov 2026: "some seem to be missing quite a bit from
+    when we removed the duplicates" — the new login backfilled about 50
+    messages a chat). Only into the room the card shows them under: the
+    newest live room of their network with this person (`rooms_of`), one to
+    one rooms only, the owner's book. Checked again only when the set of
+    retired logins changes."""
+    from . import matrix
+
+    gone = frozenset(matrix.retired_logins())
+    if not gone or r._linked == gone or not is_owner():
+        return
+    r._linked = gone
+    if not r.channel or r.channel[1] in gone:
+        return
+    me = for_room(r)
+    net = (r.network or {}).get("id")
+    if not me or not net:
+        return
+    mine = [x for x in rooms_of(me["id"])
+            if (x.get("network") or {}).get("id") == net]
+    if not mine or mine[0]["room"] != r.id:
+        return
+    own = own_ghosts()
+    live = _others(r, own)
+    for old in mine[0].get("earlier") or []:
+        o = matrix._ROOMS.get(old["session"])
+        if o is None:
+            continue
+        theirs = _others(o, own)
+        senders = {theirs[0]: live[0]} if len(theirs) == 1 and len(live) == 1 else None
+        if senders is None:
+            continue            # a group, or no one to read their words as: left apart
+        r.attach(o.id, retired=True, senders=senders)
+
+
+def _others(r, own: set[str] = frozenset()) -> list[str]:
+    """A room's people other than the owner (and his ghosts, `own`), the
+    agent and the bots."""
+    with r.lock:
+        members = list(r.members)
+    skip = _skip_of(r) | set(own)
+    return [u for u in members if u not in skip]
+
+
 def _live_handles(handles: list[dict]) -> list[dict]:
     """A card's handles less the ghosts of a bridge login now gone: one met
     only in rooms that came through it (`gmessages_1.19` once
@@ -3136,6 +3183,8 @@ def start() -> None:
     from . import contacts_level, matrix
 
     contacts_level.register()
+    if link_retired not in matrix.LINKERS:
+        matrix.LINKERS.append(link_retired)
     matrix.unseed_quiet()
     if _STARTED.is_set() or (os.environ.get("MEDIA_CONTACTS") or "1").strip() == "0":
         return

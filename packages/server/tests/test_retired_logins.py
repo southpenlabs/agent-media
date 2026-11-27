@@ -69,3 +69,66 @@ def test_the_listing_keeps_unnamed_logins_live(monkeypatch):
     monkeypatch.setattr(matrix, "_ACCOUNT_NAMES", {})
     matrix._refresh_accounts(lambda: [{"id": "gm", "logins": [{"id": "9", "name": ""}]}])
     assert matrix._LIVE_LOGINS == {"9"}
+
+
+# --- one transcript: the retired copy read on into the live room ------------
+
+from agent_media_core import matrix as core_matrix  # noqa: E402
+
+ME = "@david:ryer.org"
+OLD_GHOST, NEW_GHOST = "@gmessages_1.19:ryer.org", "@gmessages_2.21:ryer.org"
+OLD_ROOM, NEW_ROOM = "!gm1:ryer.org", "!gm2:ryer.org"
+
+
+def _ev(eid, ts, sender, body):
+    return {"type": "m.room.message", "event_id": eid, "sender": sender,
+            "origin_server_ts": 1_790_000_000_000 + ts * 1000,
+            "content": {"msgtype": "m.text", "body": body}}
+
+
+class TwoLogins:
+    """Login 1's copy holds the long history; login 2 backfilled the last of
+    it again (`$o5` and `$n5` are one message) and has what came since."""
+
+    rooms = {OLD_ROOM: ("old", OLD_GHOST, [_ev("$o1", 1, OLD_GHOST, "from long ago"),
+                                           _ev("$o2", 2, ME, "my old answer"),
+                                           _ev("$o5", 5, OLD_GHOST, "backfilled twice")]),
+             NEW_ROOM: ("new", NEW_GHOST, [_ev("$n5", 5, NEW_GHOST, "backfilled twice"),
+                                           _ev("$n6", 6, ME, "since the pairing")])}
+
+    def __call__(self, config, path, params=None, timeout=10.0):
+        rid = next(r for r in self.rooms if path.startswith(f"/rooms/{matrix._q(r)}")
+                   or path.startswith(f"/rooms/{r}"))
+        receiver, ghost, evs = self.rooms[rid]
+        if path.endswith("/joined_members"):
+            return {"joined": {ME: {"display_name": "David"}, ghost: {"display_name": "Kat"}}}
+        if path.endswith("/state"):
+            return [{"type": "m.bridge", "content": {
+                "bridgebot": "@gmessagesbot:ryer.org",
+                "channel": {"id": "c", "fi.mau.receiver": receiver},
+                "protocol": {"id": "gmessages", "displayname": "Google Messages"}}}]
+        if path.endswith("/state/m.room.name"):
+            return {"name": "Kat"}
+        return {"chunk": list(reversed(evs))}
+
+
+def test_the_retired_copy_reads_on_below_the_live_one(monkeypatch):
+    monkeypatch.setattr(matrix, "_ROOMS", {})
+    monkeypatch.setattr(matrix, "_ALIAS", {})
+    cfg = core_matrix.Config(homeserver="https://hs.test", token="t", rooms=set())
+    new = matrix.Room(NEW_ROOM, cfg, ME, get=TwoLogins())
+    new.load()
+    new.attach(OLD_ROOM, retired=True, senders={OLD_GHOST: NEW_GHOST})
+    msgs, more = new.page(30)
+    assert [(m["id"], m["parts"][0]["text"]) for m in msgs] == [
+        ("$o1", "from long ago"), ("$o2", "my old answer"),
+        ("$n5", "backfilled twice"), ("$n6", "since the pairing")]
+    assert more is False
+    # Their old words read as theirs, the copy marked and read-only.
+    assert msgs[0]["sender"] == {"id": NEW_GHOST, "name": "Kat"}
+    assert msgs[0]["earlier"] == matrix.thread_of(OLD_ROOM)
+    assert "earlier" not in msgs[2]
+    assert new._closed_refusal("$o1") is not None
+    # Attached once only.
+    new.attach(OLD_ROOM, retired=True, senders={OLD_GHOST: NEW_GHOST})
+    assert len(new.page(30)[0]) == 4

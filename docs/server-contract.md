@@ -8871,6 +8871,17 @@ hold (and for any path that is not a uuid, as an unknown route).
   live room of that network with them it stays a row, its
   `network.account.retired` true. `handles` leaves out a ghost met only
   in such rooms (`@gmessages_1.19` beside `@gmessages_2.21`).
+  **One transcript** (27 Nov 2026, sasonica-app mail #1408: the new
+  login backfilled about 50 messages a chat, so the live room looked cut
+  short): the live room's log (`GET /conversation/log`, the thread's
+  history, `before` paging) reads on, past its own first message, into
+  each `earlier` room that is one to one, older messages only (what the
+  live copy holds is not shown twice; the overlap is cut by time at the
+  live copy's first message). Those messages carry `earlier: "<the old
+  room's session>"`, read as the live room's person (the old ghost shown
+  as the new), and are read-only like a closed portal's (409 to reply,
+  edit or react). The merge happens when the live room is first asked
+  for once the bridges' listing has answered.
 - **Edits are not here yet.** When they come (the proposal's step 4) they
   will go through the phone's provider — a content update on the person's
   `com.google` raw contact, which Android then syncs to Google — with the
