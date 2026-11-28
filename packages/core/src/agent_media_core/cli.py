@@ -11101,6 +11101,17 @@ def cmd_doctor(a) -> int:
     except Exception as _exc:  # noqa: BLE001 — a line of the report, never a failed doctor
         _failures.swallowed(_exc)
 
+    # Pairings that look replaced by a newer one: the same device paired
+    # again (agent_media_server.devices.replaced_by; David, 28 Nov 2026).
+    try:
+        from agent_media_server import devices as _devices
+        for line in _devices.doctor_lines():
+            print(f"devices: {line}")
+    except ImportError:
+        pass
+    except Exception as _exc:  # noqa: BLE001 — a line of the report, never a failed doctor
+        _failures.swallowed(_exc)
+
     # This machine's env file: lines a shell cannot source as plain settings
     # (the service run scripts `.` it; systemd reads it too). 28 Nov 2026: the
     # server's start logged "agent-media.env: 1: not found" for three of them.

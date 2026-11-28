@@ -51,6 +51,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -316,13 +317,16 @@ def list_devices() -> list[dict]:
     from . import device_kinds
 
     with _LOCK:
+        rows = _load()
+        guess = replaced_by(rows)
         return [{**{k: v for k, v in d.items() if k not in _PRIVATE and k != "rule_overrides"},
                  "role": role_of(d), "enrol": may_enrol(d), "stage": stage_mode(d),
                  "kind": device_kinds.kind_of(d), "kind_set_by": d.get("kind_set_by") or None,
                  "rules": device_kinds.rules_for(d),
                  "expires_at": expires_of(d), "scope": scope_field(d),
-                 **({"ceiling": ceiling_of(d)} if ceiling_of(d) else {})}
-                for d in _load()]
+                 **({"ceiling": ceiling_of(d)} if ceiling_of(d) else {}),
+                 **({"likely_replaced_by": guess[d["id"]]} if d.get("id") in guess else {})}
+                for d in rows]
 
 
 def revoke(device_id: str, *, expired: bool = False) -> bool:
@@ -342,16 +346,20 @@ def revoke(device_id: str, *, expired: bool = False) -> bool:
     return True
 
 
-def _outputs(event: str, row: dict) -> None:
+def _outputs(event: str, row: dict, successor: str | None = None) -> None:
     """Tell the frame players a device came or went, so a speech or music
     output picked to it follows it to its next pairing (speech_frames
-    `device_dropped` / `device_added`). Never fails the pairing."""
+    `device_dropped` / `device_added`). `successor`: the pairing known to
+    replace it (the same install, `claim_install`). Never fails the pairing."""
     try:
         from . import speech_frames
 
         did, account, name = (str(row.get(k) or "") for k in ("id", "account", "name"))
         if event == "device_added":
             speech_frames.device_added(did, account, name)
+            return
+        if successor:
+            speech_frames.device_dropped(did, account, name, successor=successor)
             return
         # The app enrols its new pairing before it signs the old one out
         # (25 Nov 2026, the same second): the successor may already be here.
@@ -716,6 +724,141 @@ def set_app(device_id: str, info: dict) -> dict | None:
         return clean
 
 
+# --- the same device paired again ----------------------------------------------
+#
+# 28 Nov 2026: Devices held two "TCL Smart TV"s, three "Android (Chrome)"s and
+# a "p8a-firefox" beside "p8a (Firefox)", each the same device paired again
+# after a sign-out or a reinstall, the old ones left until `forget_unused`
+# (up to 90 days). David: "Can they be identified in a more automated
+# manner?", then "Do both": an install id the app keeps, and a guess for
+# the pairings made before it.
+
+#: An install id: random, made once by the app and kept through sign-outs.
+INSTALL_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")
+
+#: What a device's next pairing takes over from the one it replaces: the
+#: owner's choices about it and the limits put on it. Never its role or
+#: enrol bit: those come from how it paired this time.
+CARRIED = ("kind", "kind_set_by", "rule_overrides", "pause_here", "pause_for",
+           "follow", "follow_from", "stage_auto", "scope")
+
+
+def _server_token(d: dict) -> bool:
+    """Another server's or worker's token, never one person's device."""
+    return bool(d.get("jobs") or d.get("search") or d.get("reply") or d.get("sessions"))
+
+
+def claim_install(device_id: str, install, now: float | None = None) -> list[str]:
+    """`install`, the id the app keeps for itself (POST /device/app), on
+    this device's row. An older pairing with the same install is this
+    device paired again: it is forgotten, its settings and limits
+    (`CARRIED`, the earlier expiry) move to this one, other devices that
+    follow it follow this one, and a speech or music output picked to it
+    moves here. A newer pairing with the same install wins instead: this
+    one is left as it is. The ids forgotten."""
+    install = str(install or "").strip()
+    if not INSTALL_RE.fullmatch(install):
+        return []
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None or _server_token(hit):
+            return []
+        same = [d for d in rows if d is not hit and d.get("install") == install
+                and not _server_token(d)]
+        if any(float(d.get("created") or 0) > float(hit.get("created") or 0) for d in same):
+            return []
+        if not same and hit.get("install") == install:
+            return []
+        new = {**hit, "install": install}
+        for old in sorted(same, key=lambda d: float(d.get("created") or 0), reverse=True):
+            for k in CARRIED:
+                if k in old and k not in new:
+                    if k == "kind" and not old.get("kind_set_by"):
+                        continue
+                    new[k] = old[k]
+            if isinstance(old.get("expires_at"), (int, float)):
+                new["expires_at"] = min(float(old["expires_at"]),
+                                        float(new.get("expires_at") or old["expires_at"]))
+        gone = {str(d.get("id")) for d in same}
+        keep = []
+        for d in rows:
+            if d is hit:
+                keep.append(new)
+            elif str(d.get("id")) not in gone:
+                if d.get("follow") in gone or any(f in gone for f in d.get("follow_from") or []):
+                    d = {**d, "follow": device_id if d.get("follow") in gone else d.get("follow"),
+                         "follow_from": list(dict.fromkeys(
+                             device_id if f in gone else f for f in d.get("follow_from") or []))}
+                keep.append(d)
+        _save(keep)
+    import logging
+
+    for old in same:
+        logging.getLogger(__name__).warning(f"devices: {old.get('id')} ({old.get('name')!r}) is {device_id} "
+                     f"({new.get('name')!r}) paired again (same install); forgotten")
+        _outputs("device_dropped", old, successor=device_id)
+    return sorted(gone)
+
+
+def _name_key(name) -> str:
+    """A name with case, spaces and punctuation gone: "p8a-firefox" and
+    "p8a (Firefox)" are the same name."""
+    return re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+
+
+#: How long a pairing may still be seen after its likely successor paired
+#: (the app enrols the new one before it signs the old one out).
+REPLACED_SLACK_S = 3600.0
+
+
+def _could_be_same(a: dict, b: dict) -> bool:
+    """Nothing says `a` and `b` are different devices: no two accounts, no
+    two kinds, no two installs."""
+    for k in ("account", "install"):
+        x, y = str(a.get(k) or "").lower(), str(b.get(k) or "").lower()
+        if x and y and x != y:
+            return False
+    ka = a.get("kind") or a.get("kind_reported")
+    kb = b.get("kind") or b.get("kind_reported")
+    return not (ka and kb and ka != kb)
+
+
+def replaced_by(rows: list[dict]) -> dict[str, str]:
+    """`{old id: new id}` for each pairing that looks replaced by a newer
+    one: the same name (`_name_key`), nothing saying they differ
+    (`_could_be_same`), and the old one not seen since the new one paired.
+    A guess, for the owner to confirm; workers' tokens are never guessed."""
+    out: dict[str, str] = {}
+    for a in rows:
+        key = _name_key(a.get("name"))
+        if not key or _server_token(a):
+            continue
+        made = float(a.get("created") or 0)
+        seen = float(a.get("last_seen") or made)
+        later = [b for b in rows if b is not a and not _server_token(b)
+                 and _name_key(b.get("name")) == key
+                 and float(b.get("created") or 0) > made
+                 and float(b.get("created") or 0) + REPLACED_SLACK_S >= seen
+                 and _could_be_same(a, b)]
+        if later:
+            out[str(a.get("id"))] = str(max(later, key=lambda b: float(b.get("created") or 0)).get("id"))
+    return out
+
+
+def doctor_lines() -> list[str]:
+    """A line for each pairing that looks replaced by a newer one (`media
+    doctor`; never a fault: forgetting it is the owner's call)."""
+    with _LOCK:
+        rows = _load()
+    names = {str(d.get("id")): str(d.get("name") or d.get("id")) for d in rows}
+    seen = {str(d.get("id")): d.get("last_seen") for d in rows}
+    return [f"device {names[old]!r} ({old}, last seen "
+            f"{time.strftime('%Y-%m-%d', time.localtime(float(seen[old] or 0)))}) looks replaced by "
+            f"{names[new]!r} ({new}): forget it in Devices, or `devices --revoke {old}`"
+            for old, new in replaced_by(rows).items()]
+
+
 def report_kind(device_id: str, kind) -> str | None:
     """What kind the device says it is (device_kinds.py, §6.59): kept as
     `kind_reported`, and as `kind` (`kind_set_by: "device"`) unless the
@@ -1069,9 +1212,10 @@ def redeem(code: str, device: str, ip: str = "") -> dict | None:
             **({"reply": True} if row.get("reply") else {})}
 
 
-#: Fields that never leave the store: the token's hash, and an account's
-#: refresh token (what keeps its name and email current).
-_PRIVATE = ("sha256", "rt")
+#: Fields that never leave the store: the token's hash, an account's
+#: refresh token (what keeps its name and email current), and the app
+#: install's id (`claim_install`: whoever knew it could retire the device).
+_PRIVATE = ("sha256", "rt", "install")
 
 
 def refresh_token_of(device_id: str) -> tuple[str, str]:
@@ -1226,6 +1370,9 @@ def cli_devices(argv: list[str]) -> int:
                      help="let this jobs worker run agent sessions sent down its stream "
                           "(media session start --host; roadmap 56)")
     act.add_argument("--no-sessions", metavar="ID", help="no longer run agent sessions")
+    act.add_argument("--forget-replaced", action="store_true",
+                     help="forget every pairing that looks replaced by a newer one "
+                          "(marked [replaced by ...] in the list)")
     act.add_argument("--revoke-account", metavar="WHO",
                      help="forget every device an account enrolled (its sub, or its email)")
     act.add_argument("--log", metavar="ID",
@@ -1262,6 +1409,15 @@ def cli_devices(argv: list[str]) -> int:
             return 0
         print(f"no device {device_id}", flush=True)
         return 1
+    if args.forget_replaced:
+        with _LOCK:
+            guess = replaced_by(_load(fresh=True))
+        for old, new in guess.items():
+            if revoke(old):
+                print(f"revoked {old} (replaced by {new})")
+        if not guess:
+            print("no pairing looks replaced")
+        return 0
     if args.revoke_account:
         n = revoke_account(args.revoke_account)
         print(f"revoked {n} device(s) of {args.revoke_account}" if n else f"no devices of {args.revoke_account}")
@@ -1314,5 +1470,6 @@ def cli_devices(argv: list[str]) -> int:
               f"{'  [reply peer]' if is_reply_peer(d) else ''}"
               f"{'  [sessions]' if is_session_worker(d) else ''}"
               f"{'  account ' + d['account'] if d.get('account') else ''}"
+              f"{'  [replaced by ' + d['likely_replaced_by'] + ']' if d.get('likely_replaced_by') else ''}"
               f"{'  app ' + app_words(d) + ' (said ' + when(d.get('app_at')) + ')' if d.get('app') else ''}")
     return 0

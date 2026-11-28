@@ -8011,7 +8011,7 @@ screen). Not screen mirroring. Code: `follow.py`; tests in `test_follow.py`.
   it opened last (`session`, still set on `"list"`), when its screen last
   changed (`at`, epoch seconds) and that thread's title. Every field null
   and `phones` `[]` while it mirrors nobody.
-- `POST /device/app {"build"?, "sha"?, "platform"?, "shell"?, "web"?, "kind"?}` — any
+- `POST /device/app {"build"?, "sha"?, "platform"?, "shell"?, "web"?, "kind"?, "install"?}` — any
   paired device, a guest too (401 otherwise) → `{ok, app, kind}`: `kind` is
   what kind of device it is (`phone` | `tablet` | `tv` | `computer`, §6.59;
   an unknown value is ignored, and an owner's choice is never overwritten),
@@ -14540,6 +14540,46 @@ POST /pair/approve {…, "expires_at"?: <epoch s>}   400 bad_expiry
   cannot lock itself out.
 - `/features` has `device_limits: true`. `/devices/expiry` and
   `/devices/scope` are in `CORS_PATHS`.
+
+### 6.59b The same device paired again — an install id, and a guess for older pairings (built 28 Nov 2026)
+
+Devices held two "TCL Smart TV"s and a "p8a-firefox" beside "p8a
+(Firefox)", each the same device paired again after a sign-out or a
+reinstall, the old one left until `forget_unused` (David, 28 Nov 2026: "Can
+they be identified in a more automated manner?", then "Do both").
+`agent_media_server/devices.py` (`claim_install`, `replaced_by`); pinned by
+`test_device_paired_again.py`.
+
+```
+POST /device/app {…, "install": "<16-64 of A-Z a-z 0-9 _ ->"}     the app's own install id
+GET  /devices    rows gain "likely_replaced_by": "<device id>"    (absent when not)
+```
+
+- **`install`**: a random id the app makes the first time it runs and keeps
+  through sign-outs and server changes (Android: app storage, cleared only
+  by uninstalling or clearing its data; web: localStorage). Never a
+  hardware id. Sent on every `POST /device/app`, so the first report after
+  a pairing is when it counts. Never shown back (not in `/devices`).
+- **An older pairing with the same install is this device paired again**,
+  and is forgotten at once, as by `POST /devices/revoke`. Its owner-set
+  kind, rules, Pause what's playing here, follow, stage auto and chat scope
+  move to the new pairing where the new one has none, and the earlier of
+  the two expiries holds, so pairing again never lifts a limit. Its role and
+  enrol bit do not move: those come from how it paired this time. Devices
+  that followed it follow the new one, and a speech or music output picked
+  to it moves to it. A newer pairing with the same install is never retired
+  by an older one; workers' and peers' tokens are never retired this way.
+  A value that does not match the pattern is ignored.
+- **`likely_replaced_by`**, for pairings made before the app sent an
+  install: a newer pairing with the same name, case, spaces and punctuation
+  ignored ("p8a-firefox" is "p8a (Firefox)"), where nothing says they
+  differ (two accounts, two kinds, two installs), and the old one not seen
+  since the new one paired (an hour's slack). A guess: the app shows it on
+  the old row ("Probably replaced by <name>") with a Forget button that is
+  `POST /devices/revoke`; nothing is forgotten without the owner.
+- Also `media-visual-canvas devices` marks them `[replaced by <id>]`,
+  `devices --forget-replaced` forgets them all, and `media doctor` lists
+  them (a line, never a fault).
 
 ### 6.60 Which model each feature uses, choosing it, and its usage — gated; not for guests (built 17 Nov 2026)
 

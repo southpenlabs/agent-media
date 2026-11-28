@@ -5324,6 +5324,10 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         before = next((d.get("app") for d in devices.list_devices() if d.get("id") == dev), None)
         body = _read_json(h) or {}
         got = devices.set_app(dev, body)
+        if got is not None and body.get("install"):
+            # The id the app keeps through sign-outs: an older pairing with
+            # it is this device paired again, and is forgotten.
+            devices.claim_install(dev, body.get("install"))
         # `kind`: what kind of device it is (§6.59); an owner's choice wins.
         kind = devices.report_kind(dev, body.get("kind")) if got is not None else None
         if got is not None and got != before:
