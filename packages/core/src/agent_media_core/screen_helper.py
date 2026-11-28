@@ -130,7 +130,7 @@ def pair(link: str, server: str = "", name: str = "") -> dict:
     _save(rec)
     # Say what kind of device this is (§6.59), so Settings shows a computer.
     try:
-        _http(base + "/device/app", {"kind": "computer", "platform": sys.platform},
+        _http(base + "/device/app", {"kind": "computer"},
               token=rec["token"])
     except ScreenError:
         pass
@@ -325,11 +325,20 @@ def cmd(a) -> int:
               + (f" ({got['why']})" if got.get("why") else ""))
         return 0
     from . import logs
-    logs.setup()
+    # Under pythonw (the Windows logon task) there is no stderr: log to a file.
+    stream = sys.stderr if sys.stderr is not None else open(  # noqa: SIM115
+        conf_path().with_name("screen.log"), "a", buffering=1, encoding="utf-8")
+    logs.setup(stream=stream)
     return run(conf, once=a.once)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    # A Windows console's code page cannot print "→"; never die over it.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
     p = argparse.ArgumentParser(prog="media screen", description=__doc__.split("\n\n")[0])
     add_args(p)
     return cmd(p.parse_args(argv))
