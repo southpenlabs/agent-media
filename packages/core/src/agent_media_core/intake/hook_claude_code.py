@@ -1898,13 +1898,24 @@ def _handle_user_prompt(payload: dict, record: bool = True) -> int:
     text = strip_system_blocks(raw)
     if not text:
         return 0
-    _reply_read(session)
+    if not _said_by_nobody_listening(text):
+        _reply_read(session)
     if not record:
         return 0
     if len(text) > PROMPT_RECORD_LIMIT:
         log.info("hook: prompt of %d chars not recorded (paste)", len(text))
         return 0
     return _record_listener_text(session, text)
+
+
+def _said_by_nobody_listening(text: str) -> bool:
+    """Another agent's mail ("[From Sam] …") or the session host's own note:
+    words the listener did not say, so the reply being read to them reads on
+    (David, 28 Nov 2026: "What happened to the reply that was being spoken?
+    why did it get interrupted?" — mail arriving mid-reading had cut it at
+    its last sentence)."""
+    t = text.lstrip()
+    return bool(mail_from(t)) or t.startswith("[From the session host]")
 
 
 def _reply_read(session: str) -> None:

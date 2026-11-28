@@ -238,6 +238,23 @@ def test_main_routes_the_event_and_records_nothing(monkeypatch):
     assert seen == [] and read == ["s-2"]
 
 
+def test_mail_and_host_notes_leave_the_reading_alone(monkeypatch):
+    """Another agent's mail, or the session host's note, arriving while a
+    reply is read is not the listener answering: the reading goes on. The
+    listener's own words still end it."""
+    _capture_record(monkeypatch)
+    from agent_media_core.intake import submit
+    read = []
+    monkeypatch.setattr(submit, "session_reply_read", lambda s, **k: read.append(s))
+    for prompt in ("[From Sasonica-app] [agent-mail #1435] Stored message …",
+                   "<system-reminder>x</system-reminder>\n[From Sam] hi",
+                   "[From the session host] A restart of the session host is waiting"):
+        H._handle_user_prompt({"prompt": prompt, "session_id": "s-3"}, record=False)
+    assert read == []
+    H._handle_user_prompt({"prompt": "why did it stop?", "session_id": "s-3"}, record=False)
+    assert read == ["s-3"]
+
+
 def test_codex_question_uses_shared_storage_and_speech(tmp_path, monkeypatch):
     from agent_media_core import harnesses, pending_asks
     from agent_media_core.intake import agent_events
