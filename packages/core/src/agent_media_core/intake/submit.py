@@ -1367,8 +1367,11 @@ def credit_resume(prior: dict, live: Optional[dict]) -> None:
     if not paused_at:
         return
     resumed = float(live.get("_read_at") or time.time())
-    held = max(0.0, resumed - float(paused_at))
     started = float(prior.get("play_started_at") or 0)
+    # A pause cannot have begun before the reply's clock did: a stamp older
+    # than that is left over from another reply, and crediting it put the
+    # clock in the future (clip 38317, 28 Nov 2026).
+    held = max(0.0, resumed - max(float(paused_at), started))
     if started:
         prior["play_started_at"] = started + held
     read_at = float(prior.get("live_pos_at") or 0)
@@ -5797,6 +5800,16 @@ def _submit_event(event: Event,
                     # over us and is what is heard now. The row says so; this
                     # reply must not write its own sentences over it.
                     return
+                if prior.get("writer_pid") != os.getpid():
+                    # Another reply's row: one that ended without clearing it
+                    # leaves its `paused_at` behind. The phone's player was
+                    # still paused at this reply's first reading, so
+                    # carry_pause_stamp dated the pause from that stamp, 32
+                    # minutes old, and the next reading credited all of it:
+                    # `play_started_at` half an hour ahead, every sentence
+                    # stamped 0.0, the bold lost (clip 38317, agent-mail
+                    # #1428, 28 Nov 2026). Its clock is not ours.
+                    prior = {}
                 if rebase:
                     # Back after stepping aside (a yield): the phone starts
                     # sentence `idx` again from its beginning, now. The time

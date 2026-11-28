@@ -269,3 +269,16 @@ def test_a_toggle_resume_already_credited_is_not_credited_twice():
     prior = {"play_started_at": 100.0}
     credit_resume(prior, {"pause": False})
     assert prior == {"play_started_at": 100.0}
+
+
+def test_a_pause_stamp_older_than_the_reply_is_not_credited():
+    """Clip 38317 (28 Nov 2026): a reply that never cleared the row left a
+    pause stamp 32 minutes old; the next reply credited all of it and its
+    clock started half an hour in the future, every sentence stamped 0.0.
+    Only the part of a pause after the reply's clock began is credited."""
+    now = time.time()
+    prior = {"play_started_at": now - 2.0, "paused_at": now - 1945.0}
+    credit_resume(prior, {"pause": False, "_read_at": now})
+    assert "paused_at" not in prior
+    assert prior["play_started_at"] <= now
+    assert prior["play_started_at"] == pytest.approx(now, abs=0.01)
