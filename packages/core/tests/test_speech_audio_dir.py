@@ -164,24 +164,3 @@ def test_relocate_prefix_matches_whole_folder_names(xdg):
     assert st.relocate_prefix("/x/audio", "/y/audio") == 1
     assert st.history_row(a)["uri"] == "/y/audio/a.mp3"
     assert st.history_row(b)["uri"] == "/x/audio-old/b.mp3"
-
-
-def test_history_dir_moves_state_db_and_clips(xdg, monkeypatch):
-    """MEDIA_HISTORY_DIR: a machine's chats write history and clips where its
-    server reads them (red5's small server, 28 Nov 2026)."""
-    from agent_media_core.state.store import default_db_path
-    monkeypatch.delenv("XDG_STATE_HOME")
-    other = xdg / "server-state" / "agent-media"
-    monkeypatch.setenv("MEDIA_HISTORY_DIR", str(other))
-    assert default_db_path() == other / "state.db"
-    assert _paths.speech_audio_dir() == other / "audio"
-    assert _paths.state_dir() == xdg / "home" / ".local" / "state" / "agent-media"
-
-
-def test_history_dir_ignored_under_an_isolated_state(xdg, monkeypatch):
-    """A test or sandbox with its own XDG_STATE_HOME keeps its own history,
-    whatever the machine's env file names."""
-    from agent_media_core.state.store import default_db_path
-    monkeypatch.setenv("MEDIA_HISTORY_DIR", str(xdg / "real"))
-    assert default_db_path() == xdg / "state" / "agent-media" / "state.db"
-    assert _paths.speech_audio_dir() == xdg / "state" / "agent-media" / "audio"

@@ -282,15 +282,19 @@ only. So:
   stays red2's.
 - red5 declares `["server", "render", "origin"]`. Its worker pairing to
   red2 (`sessions`) is still to do.
-- **Its chats' speech history** (28 Nov 2026, agent-mail #1424): red5's
-  chats read agent-media.env, so they wrote history and clips to the
-  default state folder while the server read its own, and every red5 chat
-  reached the app with `spoken: null` (no Play, no follow-along, no
-  Unheard). `MEDIA_HISTORY_DIR` in the chats' env file names the server's
-  state folder: `state.db` and the clips go there (`_paths.history_dir`),
-  and the chats' other state stays where it was. It is ignored where
-  XDG_STATE_HOME names a folder of its own (a test, a sandbox, the small
-  server itself). Replies spoken before then stay in the old history.
+- **One state folder with its chats** (28 Nov 2026, agent-mail #1424 and
+  #1440): red5's chats read agent-media.env and kept the default state
+  folder while the server kept its own, so the two never met: replies
+  reached the app with `spoken: null`, every reply in a red5 thread was
+  held as if no thread were open (thread-watching.json), and toasts,
+  pocketed and looking threads and the device blacklist were split too.
+  A setting that moved history and clips (a111855c) covered only part, and
+  some forty modules read XDG_STATE_HOME themselves, so the fix is on the
+  host: the server's folder now is the default one (`XDG_STATE_HOME` gone
+  from server.env), the old full copy was set aside under a dated name as
+  the rollback and backup, and the chats' own files (voices, stamps,
+  sessiond's records, catch-up) were carried over. The server's identity,
+  devices and history are its own, as decided.
 
 ## Decisions (David, 13 Nov 2026, on a question card)
 
