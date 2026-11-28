@@ -3928,10 +3928,17 @@ def _phone_confirmed(since: float) -> bool:
     and was marked heard (David, 14 Nov 2026: unheard replies gone, never
     heard). The hub says when the phone last reported (speech_frames
     REPORTED_AT); any other player has no such property and is believed, as
-    before."""
+    before. The hub itself failing to answer means no phone is connected to
+    it yet (it passes the ask through or refuses it, 28 Nov 2026), so
+    nothing is confirmed: a reply left unheard has its Play; one wrongly
+    marked heard is lost."""
+    sock = _sock()
     try:
-        at = ipc.get_property(_sock(), "user-data/agent-media/reported-at")
+        at = ipc.get_property(sock, "user-data/agent-media/reported-at")
     except Exception as _exc:  # noqa: BLE001 — not a frames hub: its own word stands
+        from .restart_services import _is_frames_hub
+        if _is_frames_hub(sock):
+            return False
         _failures.swallowed(_exc)
         return True
     if not isinstance(at, (int, float)) or isinstance(at, bool):

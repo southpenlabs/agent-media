@@ -145,3 +145,24 @@ def test_mic_ignore_and_off(monkeypatch):
     assert sh.mic_users() == ["arecord"]
     monkeypatch.setenv("MEDIA_SCREEN_MIC", "0")
     assert sh.mic_users() == []
+
+
+def test_a_failing_turn_does_not_end_the_loop(monkeypatch):
+    class Boom(FakeBackend):
+        calls = 0
+
+        def playing_players(self):
+            Boom.calls += 1
+            raise RuntimeError("winrt gone")
+
+    b = Boom([])
+    monkeypatch.setattr(sh, "ask", lambda rec: {"on": True, "pause": True})
+    n = {"i": 0}
+
+    def sleep(_):
+        n["i"] += 1
+        if n["i"] >= 3:
+            raise KeyboardInterrupt
+
+    assert sh.run({"url": "u", "token": "t"}, backend=b, sleep=sleep, mic=lambda: []) == 0
+    assert Boom.calls == 3

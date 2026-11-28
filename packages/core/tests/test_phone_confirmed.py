@@ -39,3 +39,9 @@ def test_a_player_without_the_property_is_believed(monkeypatch):
     assert cli._phone_confirmed(1000.0) is True
     _says(monkeypatch, None)
     assert cli._phone_confirmed(1000.0) is True
+
+
+def test_the_hub_with_no_phone_yet_confirms_nothing(monkeypatch):
+    _says(monkeypatch, fails=True)
+    monkeypatch.setenv("MEDIA_SPEECH_FRAMES_LISTEN", "127.0.0.1:1")
+    assert cli._phone_confirmed(1000.0) is False

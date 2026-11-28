@@ -307,15 +307,21 @@ def run(rec: dict, backend=None, sleep: Callable[[float], None] = time.sleep,
                 log.warning("%s", e)
                 last_err = str(e)
             server = None
-        # The switch governs the mic too: off is off.
-        users = mic() if on else []
-        if users != last_mic:
-            if users:
-                log.info("microphone in use by %s", users)
-            else:
-                log.info("microphone free")
-            last_mic = users
-        d.step(True if users else server)
+        try:
+            # The switch governs the mic too: off is off.
+            users = mic() if on else []
+            if users != last_mic:
+                if users:
+                    log.info("microphone in use by %s", users)
+                else:
+                    log.info("microphone free")
+                last_mic = users
+            d.step(True if users else server)
+        except Exception as e:  # noqa: BLE001 - one bad turn never ends the loop
+            # Run from a logon task, a crash stays dead until the next sign-in
+            # (how hpo's old ducker went quiet): log it and go round again.
+            log.warning("turn failed: %r", e)
+            _failures.swallowed(e)
         if server is None:
             # Keep asking quickly while something is paused, so it fails open on time.
             wait = POLL_ON_S if (d.holding or on) else POLL_ERR_S
@@ -357,6 +363,15 @@ def _self_cmd(windowless: bool = False) -> list[str]:
     return [exe, "-m", "agent_media_core.screen_helper"]
 
 
+_TASK_SETTINGS = (
+    "$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) "
+    "-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable "
+    "-RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) "
+    "-MultipleInstances IgnoreNew; "
+    f"Set-ScheduledTask -TaskName '{TASK}' -Settings $s | Out-Null"
+)
+
+
 def install(dry_run: bool = False) -> str:
     if sys.platform.startswith("linux"):
         unit_dir = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd" / "user"
@@ -375,6 +390,9 @@ def install(dry_run: bool = False) -> str:
         if dry_run:
             return "would run: " + subprocess.list2cmdline(create)
         subprocess.run(create, check=True)
+        # schtasks leaves Windows' defaults: stopped after 72 hours, never run
+        # on battery (a laptop unplugged), never started again after a crash.
+        subprocess.run(["powershell", "-NoProfile", "-Command", _TASK_SETTINGS], check=False)
         subprocess.run(["schtasks", "/run", "/tn", TASK], check=False)
         return f"installed logon task {TASK!r} and started it"
     raise ScreenError(f"no media control on {sys.platform}: nothing to install")
