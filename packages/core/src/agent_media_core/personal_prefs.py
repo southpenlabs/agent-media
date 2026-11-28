@@ -108,7 +108,7 @@ class Invalid(ValueError):
 #: are only the buttons. Kinds: place, bool, date, time, text, secret.
 FIELDS: dict[str, tuple[str, str, str]] = {
     "location": ("place", "Your town or city",
-                 "Where the weather is read for the music under long readings and "
+                 "Where the weather is read for the music with replies and "
                  "the radio DJ. A city, or lat,lon; or send this phone's location "
                  "once. Leave it empty and the weather plays no part."),
     "astro.enabled": ("bool", "Use Astro Tunes",

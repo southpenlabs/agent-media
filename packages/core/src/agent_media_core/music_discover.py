@@ -394,7 +394,7 @@ def listing(which: str, page: int = 1, hide_played: bool = True, genre: str = ""
     out: dict = {"list": which, "lists": available, "page": max(1, page), "more": False,
                  "hide_played": hide_played, "items": [], "genres": [], "user": user or None}
     if which in ("for_you", "created_for") and not user:
-        raise ValueError("no ListenBrainz name here: set it in Settings → Music → About you")
+        raise ValueError("no ListenBrainz name here: set it in Settings → Media → About you")
     if which == "created_for" and not playlist:
         out["playlists"] = _playlists(user, now)
         return out

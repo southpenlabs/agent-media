@@ -537,8 +537,8 @@ See also: `server-contract.md` §6.25 "Contacts", §6.1
 Yes. In Spotify tap **Share**, pick Sasonica, then **Add to Music** or
 **Play it**; albums, playlists and songs all work, and land in **Media →
 Music → Albums**. They play in your own Spotify, on the phone or a speaker
-Spotify knows, once you sign in under **Settings → About you → Music
-accounts → Spotify remote** (Spotify asks for Premium and your own
+Spotify knows, once you sign in under **Settings → Media → About you →
+Music accounts → Spotify remote** (Spotify asks for Premium and your own
 Spotify app's client ID). Playing a Spotify album from YouTube instead is
 only in the personal-use add-on: Spotify's terms rule it out for a
 product.
