@@ -135,6 +135,19 @@ def test_a_voice_that_goes_on_pauses_and_holds_through_gaps(rig):
     assert rig["ask"]({})["pause"] is False
 
 
+def test_a_voice_longer_than_any_beep_pauses_at_once(rig):
+    assert rig["ask"]({"speaking": True, "dur": 12.4}) == {"on": True, "pause": True, "why": "reply"}
+
+
+def test_a_short_clip_still_waits_for_the_hold(rig):
+    assert rig["ask"]({"speaking": True, "dur": 1.5})["pause"] is False
+    assert rig["ask"]({"speaking": True, "dur": None})["pause"] is False
+
+
+def test_a_long_thinking_read_out_still_does_not_pause(rig):
+    assert rig["ask"]({"speaking": True, "thinking": True, "dur": 9})["pause"] is False
+
+
 def test_thinking_does_not_pause(rig):
     st = {"speaking": True, "thinking": True}
     rig["ask"](st)

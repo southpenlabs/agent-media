@@ -13,6 +13,9 @@ TV's app and a desktop helper only pause and resume:
   beep alone (an earcon, at most ~1.8 s) is speaking too, and is no reason
   to pause (David, 30 Oct 2026: "spoken notifications are okay, just not
   for beeps alone"). Once paused, a gap between sentences does not count.
+  What is playing longer than any beep (its `dur` over EARCON_MAX_S) is a
+  voice, and pauses at once (David, 28 Nov 2026: "it was a little late to
+  pause for speech"); a `dur` not yet known waits out the hold.
 - Resumed RESUME_AFTER_S after both have stopped.
 
 Only for a phone that is **at home**, meaning on the screen's network: the
@@ -35,6 +38,8 @@ import time
 from . import auth, devices, mic_state, speech_frames
 
 SPEAK_HOLD_S = 2.2
+#: The longest earcon; a clip longer than this is a voice, not a beep alone.
+EARCON_MAX_S = 2.0
 RESUME_AFTER_S = 1.5
 #: A phone last seen longer ago than this is not known to be anywhere.
 SEEN_WITHIN_S = 900.0
@@ -102,6 +107,14 @@ def _seen_here(dev: dict | None, here: str) -> bool:
     return place(str(dev.get("last_ip") or "")) == here
 
 
+def _long(state: dict) -> bool:
+    """Is what is speaking longer than any beep alone?"""
+    try:
+        return float(state.get("dur") or 0) > EARCON_MAX_S
+    except (TypeError, ValueError):
+        return False
+
+
 def now(bearer: str, state: dict) -> tuple[bool, dict]:
     """`GET /screen/now` → `{on, pause, why}`: whether the asking device
     should be paused now. `state` is the speech snapshot (/speech/now's)."""
@@ -136,7 +149,7 @@ def now(bearer: str, state: dict) -> tuple[bool, dict]:
         if voice:
             if st["speak_since"] is None:
                 st["speak_since"] = t
-            if st["paused"] or t - st["speak_since"] >= SPEAK_HOLD_S:
+            if st["paused"] or t - st["speak_since"] >= SPEAK_HOLD_S or _long(state):
                 why = why or "reply"
         else:
             st["speak_since"] = None
