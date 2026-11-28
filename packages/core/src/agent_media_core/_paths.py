@@ -42,6 +42,25 @@ def state_dir() -> Path:
     return root / "agent-media"
 
 
+def history_dir() -> Path:
+    """The folder holding `state.db` (speech and play history) and the
+    rendered clips: `state_dir()`, unless `MEDIA_HISTORY_DIR` names another.
+
+    For a machine whose chats speak through a server that keeps its own state
+    folder (red5's small server, 28 Nov 2026: its chats wrote history to the
+    default folder and the server read another, so every reply reached the
+    app with no recording). Only history and clips move; the chats' other
+    state stays in `state_dir()`. Ignored when XDG_STATE_HOME names a folder
+    of its own, so a test or sandbox that isolates the state is never sent
+    into the real history by a value read from the machine's env file.
+    """
+    explicit = os.environ.get("MEDIA_HISTORY_DIR")
+    base = os.environ.get("XDG_STATE_HOME")
+    if explicit and (not base or Path(base) == _default_state_root()):
+        return Path(explicit).expanduser()
+    return state_dir()
+
+
 def cache_dir() -> Path:
     """`XDG_CACHE_HOME/agent-media` — canonical across proot/native."""
     base = os.environ.get("XDG_CACHE_HOME")
@@ -79,6 +98,12 @@ def speech_audio_dir() -> Path:
     explicit = os.environ.get("MEDIA_AUDIO_DIR")
     if explicit:
         d = Path(explicit)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    if history_dir() != state_dir():
+        # The clips go beside the history that names them (MEDIA_HISTORY_DIR);
+        # nothing is migrated into another install's folder.
+        d = history_dir() / "audio"
         d.mkdir(parents=True, exist_ok=True)
         return d
     new = state_dir() / "audio"

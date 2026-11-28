@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Iterator, Optional, cast
 if TYPE_CHECKING:
     from .records import HistoryRow, MatrixSpeech
 
-from .._paths import state_dir
+from .._paths import history_dir
 from agent_media_core import failures as _failures
 
 
@@ -183,7 +183,8 @@ CREATE TABLE IF NOT EXISTS mute_policy (
 
 
 def default_db_path() -> Path:
-    return state_dir() / "state.db"
+    """`state.db` in the history folder (`_paths.history_dir`, MEDIA_HISTORY_DIR)."""
+    return history_dir() / "state.db"
 
 
 def _uri_filename(uri: str) -> str:
