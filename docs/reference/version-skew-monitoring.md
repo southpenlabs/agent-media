@@ -333,7 +333,14 @@ media restart-services [--only NAME …] [--after SECONDS] [--force] [--dry-run]
     replies waiting for the voice keep their place and play afterwards. A
     reply being spoken is stopped at its sentence, as a listener's Stop
     would, and replayed from there once the services are back up, ahead
-    of the queue. A paused reply is left alone; its Play picks it up.
+    of the queue. The replay waits (up to 45 s) for the phone to report to
+    the restarted speech hub: sent before, it went to nobody and the
+    phone's first report, idle, undid it (27 and 28 Nov 2026; a hub with
+    no phone yet cannot answer, and that counts as "not back", not "not a
+    hub"). It then has 30 s to be heard playing after a phone report; if
+    not, the restart log says "did not play after the pick-up" and `media
+    doctor` flags it for a day (`health_log` `restart_pickup`). Its Play
+    has it either way. A paused reply is left alone; its Play picks it up.
     `--force` still carries speech across. `MEDIA_RESTART_SPEECH_RESUME=0`
     restores the old wait: refused while a reply is spoken or waiting.
 - `--after SECONDS` runs the restart later and returns at once with the unit
