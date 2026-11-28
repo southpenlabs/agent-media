@@ -109,6 +109,24 @@ branch `sasonica` (two commits on its v32.0; sasonica-bridges b0705e7,
   (wlynxg/anet) needs `-checklinkname=0` to link. A tag (or a separate
   package) for calls would drop both where calls cannot run. State: idea.
 
+## mautrix-meta (mautrix/meta, AGPL-3.0) — Messenger in Sasonica Bridges
+
+Muting a Messenger chat in Sasonica never reached Facebook: the connector's
+`MetaClient` had no `HandleMute`, though messagix already had the task for it
+(`MuteThreadTask`). So Bridges reported Messenger's mute as "from the network
+only". Our fork,
+[davidj4tech/meta](https://github.com/davidj4tech/meta), adds the handler:
+its `sasonica` branch is the commit on v0.2611.0 (what sasonica-bridges
+requires), and `messenger-mute` is the same commit on upstream main.
+
+- **HandleMute for Messenger.** It sends `MuteThreadTask` with the mute's end
+  time in the encoding `LSUpdateThreadMuteSetting` reports back. Encrypted
+  (hybrid) threads use their Facebook thread key in sync group 95.
+  State: sent as a draft 28 Nov 2026 (David: "Fork it, patch it, offer
+  upstream"): https://github.com/mautrix/meta/pull/681. It goes ready once a
+  live account shows the mute in Facebook's app (sasonica-bridges, agent-mail
+  #1442). Drop the fork when it is merged and released.
+
 ## Capacitor (ionic-team/capacitor, MIT) — the Android shell
 
 - **A route with a dot in its last segment is not served as the app.**
