@@ -18,6 +18,36 @@ Device names, hosts and paths in commands are examples; use your own.
 - What is the Music under replies level relative to?
 - What can I do with the song after a long reply?
 - Why does my music go quiet, then swell, while a reply plays?
+- How do I get back to the Outro from the mini player?
+- How do I make the tips show again?
+- Can I change how much the speed buttons step?
+- What can I set for answering with earbud taps?
+- How do I add a video from my phone to Practice?
+- Why is part of a reply read as "thinking"?
+
+**Agents and chats**
+
+- How do I give an agent permission from my phone?
+- Can I close a chat when it's done?
+- Do my chats carry over when the server moves to another machine?
+
+**Messages and bridges**
+
+- Does Quiet also mute the chat on Telegram?
+- How do I sign in to a bridge again, and where does the code go?
+- A bridge wants my contacts. Do I have to share them?
+- Can I change how quickly a bridge picks up new messages?
+- Why do I see two conversations for one person?
+
+**Music**
+
+- Can I share a Spotify album or song link?
+- Why does a song need a downloader at home?
+
+**Devices**
+
+- Which device does speech come out of, and how do I change it?
+- Can I use a spare phone, tablet or TV as another screen?
 
 **On the server**
 
@@ -121,7 +151,7 @@ See also: `server-contract.md` §19, "Thread links".
 ### What is the music under replies, and how do I change it?
 
 Replies can play over quiet backing music, the way a radio host talks over
-a bed. **Settings → Music with replies** picks the source: generated
+a bed. **Settings → Media → Music with replies** picks the source: generated
 moods and styles (bossa nova, piano, lo-fi…), your streaming service
 (house speakers only), a free online library (archive.org and ccMixter), or
 **your favourites, instrumental**: official instrumental or karaoke
@@ -142,7 +172,7 @@ dB is about half as loud to the ear). It is approximate: songs differ in
 loudness, and a voice rendered on your phone may differ from one rendered on
 the server. A new install starts at -30 dB. The level is the one **under the words**: in the pauses the music
 swells up to 6 dB above it. Every device shares it: change it on the full
-player (**Levels**, tap to fold) or in Settings → Music, and the next sound
+player (**Levels**, tap to fold) or in Settings → Media, and the next sound
 plays at the new level.
 
 The same slider sets how far your own music (the radio, a playlist) is
@@ -156,7 +186,7 @@ See also: `packages/core/src/agent_media_core/music_bed.py` (`gain_db`,
 
 After a long reply over one of your favourites, the original song, vocals
 and all, takes over from the instrumental and plays to the end of a chorus:
-the **Outro** (**Outro music after long replies** in Settings → Music, or
+the **Outro** (**Outro music after long replies** in Settings → Media, or
 under Intro & outro on the full player; it was called Sing it out until
 14 Nov 2026). It is not **Finish with an ending**, which only gives the
 backing music its own close (a closing chord or a filtered fade). While it plays it
@@ -176,7 +206,7 @@ playing", "start the radio", "stop the music". Only on the phone; the song
 after a reply on house speakers has no controls yet.
 
 The **Intro**, **Intro music before long replies** (formerly Sing it in;
-off until you turn it on, in Settings → Music or under Intro & outro on the
+off until you turn it on, in Settings → Media or under Intro & outro on the
 full player), is the same thing the other
 way round: before a long reply over one of your favourites, about three and
 a half seconds of the original fade in from quiet at its chorus, then the
@@ -267,7 +297,7 @@ See also: `packages/core/src/agent_media_core/sleep_timer.py`, the
 
 ### What is calm mode?
 
-Two switches in Settings → Music. **Calm mode** turns it on now; **Calm in
+Two switches in Settings → Media. **Calm mode** turns it on now; **Calm in
 the evenings** turns it on by itself from 9 pm to 6 am. While it is on,
 replies are read in a slower, softer voice, the music under them is the
 quiet night bed (no beat, never your favourites), there is no outro after a
@@ -327,6 +357,235 @@ whether its switch is on, and what the server says now. Then:
   folder (it has timestamps), and `media doctor` on the server, whose
   `pause:` and `phone:` lines say whether the helper is checking in and
   whether the phone's mic watcher is running.
+
+### How do I get back to the Outro from the mini player?
+
+In a thread, while the song after a reply is playing (the **Outro**, once
+called Sing it out), the switch key at the end of the song's row brings up
+the reply's player and the song keeps going. To switch back, tap **♪** on
+the reply's key row, or the song's name (beside a small green dot) on the
+player's top line. The choice lasts for that song only: the next Outro
+opens on its own player. Away from a thread the song simply is the mini
+player.
+
+See also: `server-contract.md` `/speech/music-bed` ("The Outro");
+`sasonica-app` `components/SpeechBar.tsx`, `components/SongBar.tsx`.
+
+### How do I make the tips show again?
+
+**Settings → Display → Tips → Show all tips again**. Every tip comes back,
+those put away with **Don't show again** too, and each shows up to three
+more times; it also turns **Show tips** back on. × only closes a tip for
+now. Tips are kept per device, so do this on each phone or browser.
+
+See also: `sasonica-app` `lib/tipsOn.ts` (`resetTips`).
+
+### Can I change how much the speed buttons step?
+
+Yes: **Settings → Voice and speech → Speed → Steps**. **Ladder** (the
+default) goes 1, 1.2, 1.5, 2, 3×, in 0.1 steps below 1×; **0.05×**,
+**0.1×** or **0.25×** give even steps from 0.3× to 3×. It sets − and +,
+each notch of the drag, and the headset's speed keys, on every device.
+
+See also: `server-contract.md` `/speech/speed-reset` (`step`, `steps`);
+`packages/core/src/agent_media_core/speech_speed.py`.
+
+### What can I set for answering with earbud taps?
+
+Answering by taps is always on. When a question is read out, the voice
+says which tap picks which option ("Tap for Yes. Double tap for No.") and
+repeats your pick with a chance to undo it. With the earbuds connected,
+**Settings → Voice and speech → Earbuds** shows how they answer; for a model
+the server doesn't know, **Teach me your earbuds** takes six taps. In a
+car, **Teach me your car's buttons** (while parked). **Wearing:** on the
+full player says which bud is in. What each tap does is set in the
+earbuds maker's own app.
+
+See also: `server-contract.md` §6.63 "Earbuds";
+`sasonica-app` `components/EarbudsSettings.tsx`.
+
+### How do I add a video from my phone to Practice?
+
+**Media → Practice → Add from phone**, then pick a video or audio file. It
+uploads with a percentage (**Stop** cancels), and the file joins the list;
+a video gets a **Watch** button. The button shows only where the server
+takes uploads. For a YouTube video or a podcast, paste its link in the box
+above instead.
+
+See also: `server-contract.md` §6.45 `POST /practice` (`upload`,
+`/features` `practice_upload`).
+
+### Why is part of a reply read as "thinking"?
+
+With **Read thinking aloud** on, the words an agent writes just before it
+runs a step ("I'll push this first…") are progress, not the reply, so they
+are read as thinking: after a soft chime, a little slower and quieter.
+Only the turn's last message is read as the reply, and words leading into
+a question card are read with the question. To turn it off for one chat,
+tap the speech badge at the top of the thread; for all chats, **Settings →
+Voice and speech → Read thinking aloud by default**.
+
+See also: `server-contract.md` `/session/thinking-speech`,
+`/speech/thinking`; `packages/server/src/agent_media_server/thinking_speech.py`.
+
+## Agents and chats
+
+### How do I give an agent permission from my phone?
+
+When an agent needs your OK, its chat shows **Needs you** with a card under
+its last message, and the phone posts a notification, with buttons when
+one tap can answer. A chat started from the phone asks before it runs a
+command, changes a file or fetches a page; reading needs no OK. Its card
+offers **Allow** or **Deny**, for that once: there is no "always allow"
+from the phone. A chat at a computer shows its own choices, such as "Yes,
+and don't ask again". A file the agent's settings forbid outright (a
+`.env`, a key) never asks: change that rule at the computer.
+
+See also: `server-contract.md` §6.2 `approval`, §6.4 `POST /session/answer`,
+§17 "Permissions".
+
+### Can I close a chat when it's done?
+
+Yes. In the chat's **⋮** menu (or a long press in Chats), **Exit session**
+stops the agent and **Exit & archive** also files the chat under Archived.
+Nothing is deleted: a message sent to an ended chat starts it again where
+it left off, and an archived chat comes back to the list when you write in
+it. Closing a finished chat frees its place for another. A running chat
+has no plain Archive, so nothing keeps working out of sight.
+
+See also: `server-contract.md` §6.4 `POST /session/close`,
+`POST /session/archive`.
+
+### Do my chats carry over when the server moves to another machine?
+
+Yes, when it moves with `media server move` (or `media backup`, `media
+restore` and `media server rename` by hand). Threads, settings, paired
+devices and the server's identity go across, so nothing is paired again: a
+phone on the old address is told the new one and follows it. A chat
+working when the move stopped it carries on when you send it a message.
+An agent resumes only where its project folder exists on the new machine.
+
+See also: `docs/reference/server-address.md` ("Moving to another
+machine"); `docs/reference/backup-and-restore.md`.
+
+## Messages and bridges
+
+### Does Quiet also mute the chat on Telegram?
+
+Yes. **Quiet for…** or **Mute…** in a Telegram chat's **⋮** menu mutes it
+in Telegram too, for the same time or "Until I turn it off", and ending it
+unmutes it there (never a mute you set in Telegram itself). A Quiet that
+follows work shifts is not passed on. On the other server bridges, Quiet
+and Mute stay inside Sasonica. For chats Sasonica Bridges runs on the
+phone, Mute reaches the network where it allows; the Mute sheet says so
+("Kept in step with WhatsApp").
+
+See also: `server-contract.md` §6.72 "Quiet and Mute reach Telegram",
+§6.4 `POST /session/quiet`, `POST /session/mute`.
+
+### How do I sign in to a bridge again, and where does the code go?
+
+Some networks, Instagram and WhatsApp among them, sign a bridge out now and
+then. Chats then shows "… needs you to sign in again", and the notification
+opens that sign-in. Tap **Sign in again** there, or on the network's page
+in **Settings → Messaging and contacts → Messaging bridges**. A code the
+network sends you, by text or in its own app (Telegram does this), goes in
+the box on that same screen; a code the screen shows goes into the
+network's app. Accounts that run on the phone sign in again in the
+Sasonica Bridges app.
+
+See also: `server-contract.md` §6.26 "Bridges: signing in from the app".
+
+### A bridge wants my contacts. Do I have to share them?
+
+No. Neither Sasonica nor Sasonica Bridges asks Android for your contacts; a
+bridge brings in chats from the account, not your address book. A request
+while signing up or in comes from the network's own app (Instagram's
+sign-up asks): tap **Skip** or **Not now**, and **Don't allow** if Android
+asks. Names come from the chats, and from contacts you choose to add under
+**Settings → Messaging and contacts → Contacts**.
+
+See also: `server-contract.md` §6.25 "Contacts".
+
+### Can I change how quickly a bridge picks up new messages?
+
+There is no delay to shorten: a bridge keeps a live connection to its
+network, so a message reaches the server within seconds and an open app
+straight away. When messages seem late, the app was usually in the
+background (the message comes with its notification), the bridge was
+reconnecting (they then arrive in a burst), or Android paused Sasonica
+Bridges to save battery.
+
+See also: `server-contract.md` §6.13 "The session list as a stream".
+
+### Why do I see two conversations for one person?
+
+Usually they are on two networks or accounts, say SMS and WhatsApp, and
+each keeps its own. Tick **One row per person** in Chats' **Sort** menu
+(the arrows) to show them as one row; the person's card lists them all.
+That needs both on one contact: if the person appears twice, **Settings →
+Messaging and contacts → Contacts → Same person?** and **Join**. A bridge
+signed in to again folds its old chats into **Earlier history**.
+
+See also: `server-contract.md` §6.25 "Contacts", §6.1
+(`network.account.retired`).
+
+## Music
+
+### Can I share a Spotify album or song link?
+
+Yes. In Spotify tap **Share**, pick Sasonica, then **Add to Music** or
+**Play it**; albums, playlists and songs all work, and land in **Media →
+Music → Albums**. They play in your own Spotify, on the phone or a speaker
+Spotify knows, once you sign in under **Settings → About you → Music
+accounts → Spotify remote** (Spotify asks for Premium and your own
+Spotify app's client ID). Playing a Spotify album from YouTube instead is
+only in the personal-use add-on: Spotify's terms rule it out for a
+product.
+
+See also: `server-contract.md` §6.46, §6.42;
+`docs/reference/outside-services.md` (Spotify).
+
+### Why does a song need a downloader at home?
+
+YouTube refuses downloads from data-centre addresses, so a YouTube song is
+downloaded on a home internet line. A server at home can do it itself; one
+on a VPS uses a machine at home, usually the phone's Termux helper. When
+none is reachable, tapping a song says so: open the helper and tap again.
+A song downloaded once plays again without it. YouTube downloads need the
+personal-use YouTube add-on. See "YouTube won't download on my VPS".
+
+See also: `server-contract.md` §6.9a (`downloader_offline`);
+`packages/core/src/agent_media_core/sinks/music_fetch.py`.
+
+## Devices
+
+### Which device does speech come out of, and how do I change it?
+
+Unless you choose, replies play in the Sasonica app you used last
+(**Automatic app player**). To choose, open the full player (**All speech
+controls**) and tap **Speech output**: **Speech plays on** lists each
+paired device, and house speakers or a computer where the server has them.
+A device you pick stays picked when others connect, shows as unavailable
+when it is offline, and stays picked when it pairs again; **Back to the
+default** clears it. Music has its own **Plays on** in Media.
+
+See also: `server-contract.md` §6.9 (`/audio/targets`);
+`docs/reference/named-app-audio-outputs.md`.
+
+### Can I use a spare phone, tablet or TV as another screen?
+
+Yes. Install Sasonica on it (Android phones, tablets and Android TV) or
+open the web app, tap **Pair from your phone**, and scan its QR code with
+your phone, or type its code under **Settings → Devices → If the device
+shows a code, like a TV**. **Pair as guest**, suggested for a TV, can read
+and listen but not type into chats. **Mirror paired device** in Settings →
+Devices then makes it show the page your phone shows, and **Show on…** on
+Now playing sends the player there full screen. It follows the app; it is
+not screen mirroring.
+
+See also: `server-contract.md` §9 "Pairing from the new device", §6.21g,
+§6.21h, §6.59.
 
 ## On the server
 
