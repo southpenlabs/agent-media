@@ -143,8 +143,11 @@ def test_help_lists_shell_when_it_is_here(home, capsys):
 
 
 @posix
-def test_install_adopts_a_sasonica_shell_shim(home):
+def test_install_adopts_a_sasonica_shell_shim(home, monkeypatch):
     runner, node = runner_at(home), node_at(home)
+    # A record's gone node is replaced by the one on PATH; give it one, so
+    # the test does not depend on this machine having node installed.
+    monkeypatch.setattr(shell.shutil, "which", lambda name: str(node))
     b = home / ".local" / "bin"
     b.mkdir(parents=True)
     shim = b / "sasonica-shell"
