@@ -282,6 +282,28 @@ it; books and podcasts always pause, since you can't half-hear narration.
 
 See also: `packages/core/src/agent_media_core/route/dj.py`.
 
+### How do I make my computer or TV pause its video while I talk or a reply plays?
+
+Switch on **Pause what's playing here** for that device in Settings →
+Devices. A TV or tablet running the app needs nothing else. A Windows or
+Linux computer needs the small helper (a Mac can't be done: macOS gives apps
+no way to pause other apps):
+
+```
+media screen pair '<pair link from Settings → Devices → Pair>'
+media screen install
+```
+
+It then pauses what's playing while a reply is read, while you use the mic
+in Sasonica or your phone keyboard's voice typing, and while the computer's
+own mic is open; it plays on after. It only pauses for a phone on the same
+network (at home), never for Sasonica's own voice, and it updates itself
+from your server. A computer left off for days is fine: `media doctor`
+only notes when it last checked in. Its log is `screen.log` in the
+agent-media state folder (`~/.local/state/agent-media/`).
+
+See also: server-contract §6.21f, `packages/core/src/agent_media_core/screen_helper.py`.
+
 ## On the server
 
 ### Can I delete `~/.cache/agent-media` to free disk?

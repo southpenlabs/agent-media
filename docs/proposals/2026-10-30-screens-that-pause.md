@@ -4,7 +4,12 @@ David, 30 Oct 2026, after hpo learned to pause its video for him: "So how do
 we make this feature a little bit more distributable? maybe we can have the
 option of assigning a media centre or big screen or something?... which
 would work the same way for using the phone as a remote like we do for the
-TV." Status: **proposal, questions decided 30 Oct 2026**.
+TV." Status: **built.** Server and app 30 Oct 2026; the desktop helper
+(step 3) 28 Nov 2026 as `media screen` (core `screen_helper.py`): Windows
+and Linux, a logon task or user unit, updating itself from the server, and
+pausing also for the computer's own mic and the phone keyboard's voice
+typing. hpo's PowerShell ducker was retired the same day. Current behaviour
+is server-contract §6.21f; this file is the history.
 
 ## What there is now (29–30 Oct 2026)
 

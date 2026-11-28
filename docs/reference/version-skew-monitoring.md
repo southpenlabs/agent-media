@@ -236,6 +236,23 @@ new interpreter's view. No venv can substitute for those. `--apt-repair`
 reinstalls them; it detaches when apt holds its own lock, so it can't deadlock
 against the post-invoke hook that may have called it.
 
+## Quiet failures `media doctor` also reports (28 Nov 2026)
+
+Things that broke with nothing said, each found by someone listening. A ✗
+line marks the host unhealthy (the status bar's ⚠); a plain line is a note.
+
+| Line | ✗ when | Note when | From |
+|---|---|---|---|
+| `pause:` | a desktop pause helper still asks on an old version 8 h after the new one came out (its self-update is broken) | a device with Pause what's playing here has been quiet 10 min, or never asked. A computer left off for a week is only ever a note | `screens.doctor_lines`, check-ins in `screens-seen.json` |
+| `env:` | a line of `agent-media.env` a shell can't source (`export`, an unquoted space or `\|`) | | `intake/_env.env_file_problems` |
+| `restart:` | a reply picked up after a restart did not play (in the last day) | | `health_log` `restart_pickup` |
+| `heard:` | | three or more replays in a day the phone never confirmed | `health_log` `heard_unconfirmed` |
+| `phone:` | the phone's mic watcher is not running (dictation stops pausing speech and screens) | | `mic_watch: false` in `/device/state` |
+| `app:` | | a phone's app is behind the newest CI build that has been out over a day | `app_update.builds()` |
+
+Code: `cli._doctor_quiet_failures`, `agent_media_server.screens`,
+`health_log.py`.
+
 ## Acting on the warning: `media doctor --fix`
 
 Detection was never the gap. The status bar re-checks on a timer (10 min while
