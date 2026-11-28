@@ -2475,6 +2475,24 @@ def cmd_stop(a) -> int:
     return 0
 
 
+def cmd_reply_read(a) -> int:
+    """This chat's reply being read aloud: stop it at the end of its
+    sentence, as the listener answering would. For an agent whose mail
+    changes what that reply says (heard.mail_note; David, 28 Nov 2026:
+    "unless it's relevant and changes the outcome of the reply being
+    spoken")."""
+    from .intake.submit import session_reply_read
+    session = (getattr(a, "session", None) or os.environ.get("CLAUDE_CODE_SESSION_ID")
+               or os.environ.get("MEDIA_SESSIOND_SESSION") or "").strip()
+    if not session:
+        print("media reply-read: no chat here (give --session)", file=sys.stderr)
+        return 2
+    cut = session_reply_read(session)
+    print("reply-read: stopping at the end of the sentence" if cut
+          else "reply-read: nothing to stop (or the thread is set to Auto speak)")
+    return 0
+
+
 def cmd_speech_flush(a) -> int:
     """Drop every queued/pending reply. The clip currently speaking is not
     cut (pause/stop/supersede handle that); flushed replies still land in
@@ -11271,6 +11289,12 @@ def _build_parser() -> argparse.ArgumentParser:
                             "play the newest, dismiss it, or list them")
     s.add_argument("action", choices=["play", "dismiss", "list"])
     s.set_defaults(func=cmd_toast)
+    s = sub.add_parser("reply-read",
+                       help="stop this chat's reply being read aloud at the "
+                            "end of its sentence, as an answer would")
+    s.add_argument("--session", default=None,
+                   help="the chat (default: CLAUDE_CODE_SESSION_ID)")
+    s.set_defaults(func=cmd_reply_read)
     s = sub.add_parser("speech-flush",
                        help="drop every queued/pending reply; the clip "
                             "currently speaking plays out")

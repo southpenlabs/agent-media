@@ -89,6 +89,30 @@ def note(turn: Optional[dict]) -> str:
         "briefly rather than building on it.")
 
 
+def mail_note(turn: Optional[dict], sender: str) -> str:
+    """The context line for another agent's mail arriving while `turn` is
+    read, or "". Mail is not the listener answering, so the reading goes on
+    (hook_claude_code._said_by_nobody_listening); only the agent can tell
+    whether the mail changes what is being read, so it is told how to stop
+    it (David, 28 Nov 2026: "unless it's relevant and changes the outcome of
+    the reply being spoken")."""
+    if not turn or turn.get("listener"):
+        return ""
+    sentences = [str(s) for s in (turn.get("sentences") or [])]
+    idx = position(turn)
+    if idx is None or idx >= len(sentences) - 1:
+        return ""
+    n = len(sentences)
+    return (
+        f"agent-media: this mail from {sender} arrived while your previous "
+        f"reply was being read aloud (sentence {idx + 1} of {n}, "
+        f"“{_quote(sentences[idx])}”), and it is still being read: mail does "
+        "not stop it. If this mail changes what that reply tells the "
+        "listener (corrects it, overturns it, makes it moot), run "
+        "`media reply-read` first: the reading stops at the end of its "
+        "sentence. Otherwise leave it; your answer is read after it.")
+
+
 def _worth_a_note(prompt: str) -> bool:
     """Words someone said: not a settings command, not a harness notice."""
     from .. import slash
@@ -105,7 +129,17 @@ def note_for(payload: dict) -> str:
     if not session or not _worth_a_note(str(payload.get("prompt") or "")):
         return ""
     from ..book_tracks import _live_turn
+    from ._text import strip_system_blocks
 
+    text = strip_system_blocks(str(payload.get("prompt") or "")).lstrip()
+    if text.startswith("[From "):
+        from .hook_claude_code import mail_from
+
+        if text.startswith("[From the session host]"):
+            return ""           # the host's own note: nothing was answered
+        sender = mail_from(text)
+        if sender:
+            return mail_note(_live_turn(session), sender)
     return note(_live_turn(session))
 
 

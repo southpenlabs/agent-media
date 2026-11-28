@@ -70,6 +70,33 @@ def test_settings_commands_and_harness_notices_get_no_note(monkeypatch):
     assert H.note_for({"session_id": "s", "prompt": "yes"})
 
 
+def test_mail_is_told_the_reading_goes_on_and_how_to_stop_it(monkeypatch):
+    """Another agent's mail does not stop the reading; the agent hears where
+    it is and `media reply-read` for mail that changes it (28 Nov 2026)."""
+    monkeypatch.setattr(book_tracks, "_live_turn", lambda s: _turn())
+    text = H.note_for({"session_id": "s", "prompt":
+                       "<system-reminder>x</system-reminder>\n[From Sasonica-app] fixed"})
+    assert "mail from Sasonica-app" in text and "sentence 2 of 4" in text
+    assert "media reply-read" in text and "remaining" not in text
+    assert H.note_for({"session_id": "s", "prompt":
+                       "[From the session host] A restart is waiting"}) == ""
+    monkeypatch.setattr(book_tracks, "_live_turn", lambda s: _turn(elapsed=9.5))
+    assert H.note_for({"session_id": "s", "prompt": "[From Sam] hi"}) == ""
+
+
+def test_reply_read_command_cuts_this_chat(monkeypatch, capsys):
+    from agent_media_core import cli
+    from agent_media_core.intake import submit
+    cut = []
+    monkeypatch.setattr(submit, "session_reply_read", lambda s: cut.append(s) or 1.0)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "chat-1")
+    assert cli.cmd_reply_read(type("A", (), {"session": None})()) == 0
+    assert cut == ["chat-1"] and "stopping" in capsys.readouterr().out
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    monkeypatch.delenv("MEDIA_SESSIOND_SESSION", raising=False)
+    assert cli.cmd_reply_read(type("A", (), {"session": None})()) == 2
+
+
 def test_main_prints_the_hooks_context(monkeypatch, capsys):
     monkeypatch.setattr(book_tracks, "_live_turn", lambda s: _turn())
     monkeypatch.setattr("sys.stdin", io.StringIO(
