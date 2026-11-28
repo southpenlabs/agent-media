@@ -7890,7 +7890,11 @@ David, 29 Oct 2026: "if I'm watching something on hpo, is it possible to
 pause it for the mic and speech on Sasonica from my phone?" The listen log
 (§6.21c) comes in batches, minutes late, so the app also reports each
 opening and closing of its mic as it happens, outbound (sasonica-app
-`lib/micReport.ts`). Code: `mic_state.py`; tests in `test_mic_state.py`.
+`lib/micReport.ts`). Since 28 Nov 2026 the Android app also reports any
+other app's recording, the keyboard's voice typing included, natively from
+its holds tick (sasonica-app `speech/MicReport.java`; David: "I'd like it
+to work for the keyboard mic too please"). Code: `mic_state.py`; tests in
+`test_mic_state.py`.
 
 - `POST /device/mic {open: bool}` — a paired device only (401 otherwise);
   400 when `open` is not a bool. → `{ok: true, open}`.
