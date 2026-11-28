@@ -1507,6 +1507,33 @@ def _speech_lock_path() -> Path:
     return state / "agent-media" / "speech-playback.lock"
 
 
+def reply_reading() -> bool:
+    """Is a reply being read out here now, gaps between its sentences
+    included? The playback token (`_SpeechPlaybackLock`) is held from a
+    reply's first clip to its last, while the voice itself (popup-status's
+    ▶) stops at every gap. Read from /proc/locks, never by taking the lock,
+    so asking every second cannot get in a speaker's way; False where there
+    is no /proc (the caller then goes by the voice alone, as before).
+    For screens.now (David, 28 Nov 2026: "it keeps cutting in and out with
+    the slightest pause in the speech")."""
+    try:
+        st = os.stat(_speech_lock_path())
+        locks = Path("/proc/locks").read_text()
+    except OSError:
+        return False
+    want = f":{st.st_ino}"
+    for line in locks.splitlines():
+        parts = line.split()
+        if len(parts) >= 6 and parts[1] == "FLOCK" and parts[5].endswith(want):
+            try:
+                major, minor, _ = parts[5].split(":")
+                if (int(major, 16), int(minor, 16)) == (os.major(st.st_dev), os.minor(st.st_dev)):
+                    return True
+            except ValueError:
+                continue
+    return False
+
+
 def _speech_wait_dir() -> Path:
     state = Path(os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state"))
     return state / "agent-media" / "speech-waiters"

@@ -69,12 +69,14 @@ def rig(monkeypatch):
     monkeypatch.setattr(auth, "client_ip", lambda: ip["now"])
     tv_bearer = tv_h["Authorization"].split()[1]
 
+    reading = {"now": False}
+
     def ask(state=None):
-        ok, out = screens.now(tv_bearer, state or {})
+        ok, out = screens.now(tv_bearer, state or {}, reading_here=lambda: reading["now"])
         assert ok, out
         return out
     return {"ask": ask, "clock": clock, "seen": seen, "phone": phone, "guest": guest,
-            "tv": tv, "ip": ip}
+            "tv": tv, "ip": ip, "reading": reading}
 
 
 def _mic(dev, at):
@@ -134,6 +136,33 @@ def test_a_voice_that_goes_on_pauses_and_holds_through_gaps(rig):
     assert rig["ask"](speaking)["pause"] is True   # no new hold once paused
     rig["ask"]({})
     rig["clock"].t += screens.RESUME_AFTER_S
+    assert rig["ask"]({})["pause"] is False
+
+
+def test_a_long_gap_inside_a_reply_still_being_read_does_not_resume(rig):
+    # David, 28 Nov 2026: "it keeps cutting in and out with the slightest
+    # pause in the speech" — the voice stops at each gap, the reply does not.
+    rig["reading"]["now"] = True
+    assert rig["ask"]({"speaking": True, "dur": 6.0})["pause"] is True
+    rig["ask"]({})
+    rig["clock"].t += screens.RESUME_AFTER_S + 2.0   # the next sentence is late
+    assert rig["ask"]({})["pause"] is True
+    rig["reading"]["now"] = False                    # the reply is over
+    rig["ask"]({})
+    rig["clock"].t += 0.1
+    assert rig["ask"]({})["pause"] is False
+
+
+def test_a_wedged_reply_cannot_hold_a_screen_paused(rig):
+    rig["reading"]["now"] = True
+    rig["ask"]({"speaking": True, "dur": 6.0})
+    rig["ask"]({})
+    rig["clock"].t += screens.READING_HOLD_MAX_S
+    assert rig["ask"]({})["pause"] is False
+
+
+def test_reading_alone_never_starts_a_pause(rig):
+    rig["reading"]["now"] = True
     assert rig["ask"]({})["pause"] is False
 
 

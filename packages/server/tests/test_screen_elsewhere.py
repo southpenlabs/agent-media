@@ -73,7 +73,7 @@ def rig(monkeypatch):
     tv_bearer = tv_h["Authorization"].split()[1]
 
     def ask():
-        ok, out = screens.now(tv_bearer, {"speaking": False})
+        ok, out = screens.now(tv_bearer, {"speaking": False}, reading_here=lambda: False)
         assert ok, out
         return out
     return {"ask": ask, "clock": clock, "seen": seen, "phone": phone, "tv": tv,
@@ -175,6 +175,7 @@ class Fake:
         self.busy = False
         self.sent = []
         self.snaps = 0
+        self.reading = False
 
     def snapshot(self):
         self.snaps += 1
@@ -187,7 +188,7 @@ class Fake:
             send=lambda link, body: self.sent.append((link["url"], body)),
             snapshot=self.snapshot, busy=lambda: self.busy,
             player=lambda: {"name": "Pixel 8a", "install_hash": "ab"},
-            clock=lambda: self.t)
+            reading=lambda: self.reading, clock=lambda: self.t)
 
 
 def test_sender_says_start_repeats_and_stop():
@@ -203,7 +204,7 @@ def test_sender_says_start_repeats_and_stop():
     assert t.step()
     assert f.sent[-1] == ("https://red2.example", {
         "speaking": True, "thinking": False, "dur": 9.0,
-        "player": {"name": "Pixel 8a", "install_hash": "ab"}})
+        "player": {"name": "Pixel 8a", "install_hash": "ab"}, "reading": False})
     f.t += 0.5
     assert not t.step()                               # same state, not yet due
     f.t += 0.5
@@ -212,7 +213,7 @@ def test_sender_says_start_repeats_and_stop():
     f.t += 0.5
     assert t.step()                                   # was speaking: looks, says stop
     assert f.sent[-1][1] == {"speaking": False, "thinking": False, "dur": None,
-                             "player": None}
+                             "player": None, "reading": False}
 
 
 def test_sender_checks_now_and_then_when_the_hub_is_wrong():
@@ -222,6 +223,36 @@ def test_sender_checks_now_and_then_when_the_hub_is_wrong():
     f.snap = {"speaking": True, "dur": 5.0}           # hub says idle, wrongly
     f.t += speaking_peers.IDLE_CHECK_S
     assert t.step() and f.sent[-1][1]["speaking"] is True
+
+
+def test_sender_keeps_saying_reading_through_a_gap():
+    f = Fake()
+    t = f.teller()
+    f.busy, f.snap, f.reading = True, {"speaking": True, "dur": 6.0}, True
+    assert t.step()
+    f.busy, f.snap = False, {"speaking": False}       # a gap between sentences
+    f.t += 0.5
+    assert t.step() and f.sent[-1][1]["reading"] is True
+    f.t += speaking_peers.REPEAT_S
+    assert t.step()                                   # repeated, so it stays fresh
+    assert f.sent[-1][1] == {"speaking": False, "thinking": False, "dur": None,
+                             "player": None, "reading": True}
+
+
+def test_a_peer_still_reading_holds_the_pause_through_a_gap(rig):
+    token, _ = _peer()
+    screens.elsewhere(token, {"speaking": True, "dur": 12.0, "player": {"name": "Pixel 8a"},
+                              "reading": True})
+    assert rig["ask"]()["pause"] is True
+    screens.elsewhere(token, {"speaking": False, "reading": True})
+    rig["ask"]()
+    rig["clock"].t += screens.RESUME_AFTER_S + 1.0
+    screens.elsewhere(token, {"speaking": False, "reading": True})
+    assert rig["ask"]()["pause"] is True
+    screens.elsewhere(token, {"speaking": False, "reading": False})
+    rig["ask"]()
+    rig["clock"].t += 0.1
+    assert rig["ask"]()["pause"] is False
 
 
 def test_sender_without_links_does_nothing():

@@ -67,6 +67,12 @@ def _busy() -> bool | None:
     return speech_frames.busy("speech")
 
 
+def _reading() -> bool:
+    from agent_media_core.intake import submit
+
+    return submit.reply_reading()
+
+
 def _player() -> dict | None:
     from . import devices, speech_frames
 
@@ -74,8 +80,11 @@ def _player() -> dict | None:
     return devices.player_ref(dev) if dev else None
 
 
-def state_of(snap: dict, player: dict | None) -> dict:
-    """The body sent: {speaking, thinking, dur, player}."""
+def state_of(snap: dict, player: dict | None, reading: bool = False) -> dict:
+    """The body sent: {speaking, thinking, dur, player, reading}. `reading`:
+    a reply holds the playback token here, gaps between its sentences
+    included (submit.reply_reading), so a screen paused for it stays paused
+    through them."""
     speaking = bool(snap.get("speaking"))
     dur = snap.get("dur")
     try:
@@ -83,7 +92,8 @@ def state_of(snap: dict, player: dict | None) -> dict:
     except (TypeError, ValueError):
         dur = None
     return {"speaking": speaking, "thinking": bool(snap.get("thinking")) and speaking,
-            "dur": dur if speaking else None, "player": player if speaking else None}
+            "dur": dur if speaking else None, "player": player if speaking else None,
+            "reading": bool(reading)}
 
 
 class Teller:
@@ -95,9 +105,11 @@ class Teller:
                  snapshot: Callable[[], dict] = _snapshot,
                  busy: Callable[[], bool | None] = _busy,
                  player: Callable[[], dict | None] = _player,
+                 reading: Callable[[], bool] = _reading,
                  clock: Callable[[], float] = time.monotonic) -> None:
         self.links, self.send, self.snapshot = links, send, snapshot
         self.busy, self.player, self.clock = busy, player, clock
+        self.reading = reading
         self.last: dict | None = None
         self.sent_at: float | None = None
         self.snap_at: float | None = None
@@ -120,7 +132,7 @@ class Teller:
         links = self._current_links(t)
         if not links:
             return False
-        speaking = bool(self.last and self.last["speaking"])
+        speaking = bool(self.last and (self.last["speaking"] or self.last.get("reading")))
         b = self.busy()
         every = IDLE_CHECK_S if b is False else BLIND_CHECK_S
         if not (b or speaking or self.snap_at is None or t - self.snap_at >= every):
@@ -131,14 +143,19 @@ class Teller:
             _failures.swallowed(e)
             return False
         self.snap_at = t
-        cur = state_of(snap, None)
+        try:
+            reading = bool(self.reading())
+        except Exception as e:  # noqa: BLE001 - unknown is the voice alone
+            _failures.swallowed(e)
+            reading = False
+        cur = state_of(snap, None, reading)
         if cur["speaking"]:
             try:
                 cur["player"] = self.player()
             except Exception as e:  # noqa: BLE001 - unplaced is still a voice
                 _failures.swallowed(e)
         changed = cur != self.last
-        due = cur["speaking"] and (self.sent_at is None or t - self.sent_at >= REPEAT_S)
+        due = (cur["speaking"] or cur["reading"]) and (self.sent_at is None or t - self.sent_at >= REPEAT_S)
         if not (changed or due):
             return False
         for link in links:

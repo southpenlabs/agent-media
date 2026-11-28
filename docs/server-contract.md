@@ -7988,7 +7988,8 @@ a desktop. Code: `screens.py`; tests in `test_screens.py`. Design:
   pair --device NAME --speaking` here, then `media peer pair <alias>
   '<link>'` there (the link is stored with `speaking: true`). Its token
   opens only `POST /screen/elsewhere {"speaking": bool, "thinking"?: bool,
-  "dur"?: s, "player"?: {"name", "install_hash"}}` → `{ok}` (401 for any
+  "dur"?: s, "player"?: {"name", "install_hash"}, "reading"?: bool}` →
+  `{ok}` (401 for any
   other token). `GET /screen/now` then counts a peer's state as this host's
   own voice while it is fresher than 3 s (`ELSEWHERE_FRESH_S`), speaking
   and not thinking, with the same hold, long-clip and resume rules. Its
@@ -8000,6 +8001,15 @@ a desktop. Code: `screens.py`; tests in `test_screens.py`. Design:
   second while speaking; it takes a speech snapshot only while its frames
   hub's player is playing, and every 5 s otherwise; nothing without a
   speaking link. Tests in `test_screen_elsewhere.py`.
+- **Held through a reply's gaps (28 Nov 2026).** The voice stops at every
+  gap between sentences, and a gap longer than the 1.5 s resume resumed
+  and re-paused ("it keeps cutting in and out with the slightest pause in
+  the speech"). A screen paused for a reply now stays paused while the
+  reply is still being read: its playback token is held here
+  (`submit.reply_reading`, read from /proc/locks without taking it), or a
+  fresh peer state says `"reading": true` (the sender posts each second
+  while speaking or reading). Reading alone never starts a pause, and
+  20 s of silence (`READING_HOLD_MAX_S`) resumes anyway.
 
 ### 6.21g A device that follows a phone (built 3 Nov 2026)
 

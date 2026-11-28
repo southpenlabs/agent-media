@@ -16,7 +16,13 @@ TV's app and a desktop helper only pause and resume:
   What is playing longer than any beep (its `dur` over EARCON_MAX_S) is a
   voice, and pauses at once (David, 28 Nov 2026: "it was a little late to
   pause for speech"); a `dur` not yet known waits out the hold.
-- Resumed RESUME_AFTER_S after both have stopped.
+- Resumed RESUME_AFTER_S after both have stopped. A pause for a reply
+  holds while the reply is still being read (its playback token held,
+  submit.reply_reading, or a peer saying `reading`), so a gap between
+  sentences longer than that does not resume and re-pause (David, 28 Nov
+  2026: "it keeps cutting in and out with the slightest pause in the
+  speech"); READING_HOLD_MAX_S of silence resumes anyway, so a wedged
+  reply cannot hold a screen paused.
 
 Another server's replies count too (28 Nov 2026, agent-mail #1440: hpo did
 not pause for a reply in a thread red5 hosts, read through red5's own
@@ -44,6 +50,9 @@ import json
 import subprocess
 import threading
 import time
+from typing import Callable
+
+from agent_media_core import failures
 
 from . import auth, devices, mic_state, speech_frames
 
@@ -51,6 +60,8 @@ SPEAK_HOLD_S = 2.2
 #: The longest earcon; a clip longer than this is a voice, not a beep alone.
 EARCON_MAX_S = 2.0
 RESUME_AFTER_S = 1.5
+#: The longest silence a reply still being read holds a screen paused.
+READING_HOLD_MAX_S = 20.0
 #: A phone last seen longer ago than this is not known to be anywhere.
 SEEN_WITHIN_S = 900.0
 _TAILNET = ipaddress.ip_network("100.64.0.0/10")
@@ -331,6 +342,7 @@ def elsewhere(bearer: str, body: dict) -> tuple[bool, dict]:
         dur = None
     got = {"at": time.monotonic(), "speaking": body.get("speaking") is True,
            "thinking": body.get("thinking") is True, "dur": dur,
+           "reading": body.get("reading") is True,
            "player": ({"name": str(player.get("name") or "")[:80],
                        "install_hash": str(player.get("install_hash") or "")[:64]}
                       if player else None)}
@@ -349,6 +361,16 @@ def _elsewhere_now() -> list[dict]:
             and e["speaking"] and not e["thinking"]]
 
 
+def _elsewhere_reading() -> list[dict]:
+    """The speaking peers' fresh states that say a reply is being read
+    (between its sentences too)."""
+    t = time.monotonic()
+    with _LOCK:
+        states = list(_ELSEWHERE.values())
+    return [e for e in states if t - e["at"] <= ELSEWHERE_FRESH_S
+            and e.get("reading") and not e["thinking"]]
+
+
 def _peer_player(e: dict, rows: dict) -> dict | None:
     """The device here that plays a peer's voice: by install hash, then by
     name ignoring case and punctuation; None when neither matches."""
@@ -364,7 +386,14 @@ def _peer_player(e: dict, rows: dict) -> dict | None:
     return None
 
 
-def now(bearer: str, state: dict, helper: str = "") -> tuple[bool, dict]:
+def _reply_reading() -> bool:
+    from agent_media_core.intake import submit
+
+    return submit.reply_reading()
+
+
+def now(bearer: str, state: dict, helper: str = "",
+        reading_here: Callable[[], bool] = _reply_reading) -> tuple[bool, dict]:
     """`GET /screen/now` → `{on, pause, why}`: whether the asking device
     should be paused now. `state` is the speech snapshot (/speech/now's);
     `helper` the desktop helper's version (its X-Screen-Helper header)."""
@@ -380,7 +409,7 @@ def now(bearer: str, state: dict, helper: str = "") -> tuple[bool, dict]:
             _SCREENS.pop(me, None)
         return True, {"on": False, "pause": False, "why": None}
     here = place(auth.client_ip())
-    mic = voice = long_ = False
+    mic = voice = long_ = reading = False
     if here:
         mic = any(_counts(screen, rows.get(d)) and place(ip) == here
                   for d, ip in mic_state.open_mics().items())
@@ -401,6 +430,13 @@ def now(bearer: str, state: dict, helper: str = "") -> tuple[bool, dict]:
             if heard(_peer_player(e, rows)):
                 voice = True
                 long_ = long_ or _long(e)
+        if not voice:
+            try:
+                reading = bool(reading_here()) and heard(None)
+            except Exception as e:  # noqa: BLE001 - unknown is the voice alone
+                failures.swallowed(e)
+            reading = reading or any(heard(_peer_player(e, rows))
+                                     for e in _elsewhere_reading())
     t = time.monotonic()
     with _LOCK:
         st = _SCREENS.setdefault(me, {"speak_since": None, "paused": False,
@@ -418,7 +454,9 @@ def now(bearer: str, state: dict, helper: str = "") -> tuple[bool, dict]:
         elif st["paused"]:
             if st["quiet_since"] is None:
                 st["quiet_since"] = t
-            if t - st["quiet_since"] >= RESUME_AFTER_S:
+            hold = (READING_HOLD_MAX_S if reading and st["why"] == "reply"
+                    else RESUME_AFTER_S)
+            if t - st["quiet_since"] >= hold:
                 st.update(paused=False, quiet_since=None, why=None)
         return True, {"on": True, "pause": st["paused"], "why": st["why"]}
 
