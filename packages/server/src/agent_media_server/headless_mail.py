@@ -43,6 +43,11 @@ thread sounds like a gap"). This is the way in, through sessiond's own
   with it, as `--persona` if given. `--mail` as for `send`: a mail chat or a
   new one, never a person's. A card up is never answered: the wake is
   refused `pending` and the order waits for the next one.
+* `send --revive` with a full id wakes an ended desk-born Claude chat
+  sessiond does not hold: adopted (as the app's send does), then sent to,
+  so it resumes headless with its history (`revive`; agent-mail #1452).
+  Refused 1 with code `live` (live at a desk), `not_claude`, `unready` or
+  `adopt_failed`; 5 with no transcript.
 * `rename` gives a chat a new title the way the app's rename does
   (threads.rename_session): kept on the shelf, and `/rename` typed into a
   live one (agent-mail, 20 Nov 2026: a mailbox chat is otherwise titled by
@@ -267,6 +272,45 @@ def send(session: str, text: str, *, wait: float = 0.0) -> tuple[int, dict]:
         time.sleep(min(POLL_S, max(0.05, deadline - time.monotonic())))
 
 
+def revive(session: str, text: str, *, views: list[dict], wait: float = 0.0) -> tuple[int, dict]:
+    """`send --revive`: an ended desk-born Claude chat sessiond does not hold
+    is adopted (send._adopt_headless, as the app's send does) and then sent
+    to, so it resumes headless with its history (agent-mail #1452, David,
+    28 Nov 2026: "Wake the ended chat itself"). RC_NONE with no transcript
+    (as a plain send's "none"); RC_FAILED with a code when it is live at a
+    desk (`live`), not Claude's (`not_claude`), its agent would not answer
+    (`unready`) or the session host would not take it (`adopt_failed`)."""
+    from . import send as _send
+    from . import sessions
+
+    if not sessions._SESSION.fullmatch(session or ""):
+        return RC_NONE, {"error": "--revive needs a full session id", "code": "none"}
+    if any(str(v.get("session") or "") == session for v in views):
+        return RC_NONE, {"error": f"sessiond holds {session}", "code": "none"}
+    if not sessions.session_exists(session):
+        return RC_NONE, {"error": f"no session {session}", "code": "none"}
+    if any(r["session"] == session for r in desk_rows({str(v.get("session") or "")
+                                                       for v in views})):
+        return RC_FAILED, {"error": f"{session} is live at a desk; not revived",
+                           "code": "live", "session": session}
+    agent = sessions.agent_of(session)
+    if agent != "claude":
+        return RC_FAILED, {"error": f"{session} is a {agent or 'unknown'} chat; only Claude's "
+                                    "are revived", "code": "not_claude", "session": session}
+    unready = _send._revive_unready(session, agent)
+    if unready:
+        return RC_FAILED, {"error": unready.get("error") or "its agent would not answer",
+                           "code": "unready", "session": session}
+    refused = _send._adopt_headless(session)
+    if refused:
+        return RC_FAILED, {"error": refused.get("error") or "the session host did not take it",
+                           "code": "adopt_failed", "session": session}
+    rc, ans = send(session, text, wait=wait)
+    if rc == RC_SENT:
+        ans = {**ans, "resumed": True, "adopted": True}
+    return rc, ans
+
+
 #: The agents sessiond holds headless (sessiond.py `start`).
 AGENTS = ("claude", "opencode", "antigravity")
 
@@ -471,6 +515,9 @@ def _parser() -> argparse.ArgumentParser:
     sd.add_argument("--mail", action="store_true",
                     help="by folder, only a mail chat (one begun by another agent's mail "
                          "that no person has written in), never a person's chat")
+    sd.add_argument("--revive", action="store_true",
+                    help="by full id, an ended desk-born Claude chat sessiond does not "
+                         "hold is adopted first and resumed headless with its history")
     sd.add_argument("--json", action="store_true")
     rn = sub.add_parser("rename", help="give a chat a new title: the app's shelf and the "
                                        "agent both take it (a parked one at its next resume)")
@@ -670,6 +717,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"media session wake: {ans.get('error')}", file=sys.stderr)
         return rc
     view, why = find(a.target, views, mail=a.mail)
+    if view is None and a.cmd == "send" and a.revive:
+        rc, ans = revive(a.target.strip(), text, views=views, wait=a.wait)
+        if rc != RC_NONE:
+            if a.json:
+                print(json.dumps({"ok": rc == RC_SENT, **ans}))
+            elif rc == RC_SENT:
+                print(f"revived and sent to {ans['session']}")
+            else:
+                print(f"media session send: {ans.get('error')}", file=sys.stderr)
+            return rc
     if view is None:
         print(json.dumps({"ok": False, "code": "none", "error": why}) if a.json
               else f"media session send: {why}", file=sys.stdout if a.json else sys.stderr)

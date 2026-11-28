@@ -433,3 +433,40 @@ def test_rename_titles_the_chat_and_tells_the_live_agent(host, capsys):
     rc, d = run(capsys, "rename", "deadbeef00", "x")
     assert rc == hm.RC_NONE and not d["ok"]
     assert hm.main(["rename", sid, " "]) == hm.RC_USAGE
+
+
+def test_send_revive_adopts_an_ended_desk_chat_and_resumes_it(host, capsys, monkeypatch):
+    # agent-mail #1452: an ended desk-born Claude chat is woken itself.
+    from agent_media_server import send as send_mod, sessions
+
+    sid = "0f0e0d0c-0b0a-4908-8706-050403020100"
+    monkeypatch.setattr(sessions, "session_exists", lambda s: s == sid)
+    monkeypatch.setattr(sessions, "agent_of", lambda s: "claude")
+    monkeypatch.setattr(sessions, "transcript_cwd", lambda s: str(host.work))
+    monkeypatch.setattr(send_mod, "_revive_unready", lambda s, a: {})
+    monkeypatch.setattr(hm, "desk_rows", lambda known: [])
+    # Without --revive, as before: no such session.
+    rc, d = run(capsys, "send", sid, "reply:", "hi")
+    assert rc == hm.RC_NONE
+    rc, d = run(capsys, "send", sid, "--revive", "--from", "agent-mail", "reply:", "hi")
+    assert rc == 0 and d["ok"] and d["session"] == sid
+    assert d["adopted"] is True and d["resumed"] is True
+    assert sid in host.sup.sessions
+
+
+def test_send_revive_refuses_a_chat_live_at_a_desk_or_not_claudes(host, capsys, monkeypatch):
+    from agent_media_server import sessions
+
+    sid = "0f0e0d0c-0b0a-4908-8706-050403020101"
+    monkeypatch.setattr(sessions, "session_exists", lambda s: s == sid)
+    monkeypatch.setattr(sessions, "agent_of", lambda s: "claude")
+    monkeypatch.setattr(hm, "desk_rows", lambda known: [{"session": sid}])
+    rc, d = run(capsys, "send", sid, "--revive", "x")
+    assert rc == hm.RC_FAILED and d["code"] == "live"
+    monkeypatch.setattr(hm, "desk_rows", lambda known: [])
+    monkeypatch.setattr(sessions, "agent_of", lambda s: "codex")
+    rc, d = run(capsys, "send", sid, "--revive", "x")
+    assert rc == hm.RC_FAILED and d["code"] == "not_claude"
+    rc, d = run(capsys, "send", "0f0e0d0c-0b0a-4908-8706-0504030201ff", "--revive", "x")
+    assert rc == hm.RC_NONE
+    assert sid not in host.sup.sessions
