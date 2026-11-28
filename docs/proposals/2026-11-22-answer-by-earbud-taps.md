@@ -5,7 +5,7 @@ whenever possible... And it would be helpful if you could offer guidance
 based on the brand of earbuds being used", then "Can you work out that the
 earbuds being used And which one if it's a single ... on the fly?"
 
-Status: **decided, not started**. Extends one-tap answers
+Status: **built, all but the manual-first lookup** (28 Nov 2026: the earbuds endpoints, the tap test and the car steps are in; no `source: "manual"` yet). Extends one-tap answers
 (`2026-11-06-one-tap-answers.md`, part 6 item 3, "Pick by voice") from
 voice to the earbuds' own buttons.
 

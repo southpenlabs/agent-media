@@ -44,8 +44,11 @@ def share_from_app(text: str, channel: str, bearer: str) -> tuple[bool, dict]:
             if r.get("held"):      # the play gate: a treatment is under way
                 return False, {"error": r.get("error"), "held": True, "status": 409}
             return False, {"error": r.get("error") or "couldn't play it", "status": 502}
-        return True, {"url": url, "channel": "music", "title": got["title"],
-                      "line": f"Playing {got['title']} ({got['tracks']} tracks, from YouTube)"}
+        # Said where it plays: the listener's own Spotify has no track
+        # count of ours and no YouTube in it.
+        line = (f"Playing {got['title']} in Spotify" if r.get("on") == "spotify"
+                else f"Playing {got['title']} ({got['tracks']} tracks, from YouTube)")
+        return True, {"url": url, "channel": "music", "title": got["title"], "line": line}
     # A podcast app's episode link: its audio, on the book channel, not a
     # page handed to the music player (David, 1 Nov 2026: "I tried to share
     # a podcast with sasonica but it came through as music").
