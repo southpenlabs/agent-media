@@ -51,6 +51,14 @@ out what waited. Turn the setting off if you want silent to hold only alerts.
 See also: `server-contract.md` §6.22 "Can David be spoken to now"
 (`held_why`, `quiet_kind`, `quiet_replies`).
 
+### A reply stopped partway and didn't carry on.
+
+Most often the server restarted under it (an update). A restart stops a
+long reply at its sentence and replays it from there once the phone is
+back; if that replay doesn't play, the reply keeps its **Play** button in
+the chat, from where it stopped. `media doctor` reports such a reply for a
+day (its `restart:` line), so a pattern shows.
+
 ### Speech keeps pausing by itself, or voice typing says another app is using the mic.
 
 On many Android phones (Pixels especially), Android System Intelligence
@@ -303,6 +311,22 @@ only notes when it last checked in. Its log is `screen.log` in the
 agent-media state folder (`~/.local/state/agent-media/`).
 
 See also: server-contract §6.21f, `packages/core/src/agent_media_core/screen_helper.py`.
+
+### My computer didn't pause, or paused late.
+
+Run `media screen status` on the computer: it says whether it is paired,
+whether its switch is on, and what the server says now. Then:
+
+- **Not at home?** It only pauses for a phone on the same network.
+- **Keyboard voice typing?** That needs the phone app from build 2855 on,
+  and the app running for a few seconds: dictating straight after an
+  update or restart can be missed.
+- **Paused late, once?** The helper may have been restarting after it
+  updated itself; it pauses straight away again after that.
+- **Still nothing?** Read `screen.log` in the computer's agent-media state
+  folder (it has timestamps), and `media doctor` on the server, whose
+  `pause:` and `phone:` lines say whether the helper is checking in and
+  whether the phone's mic watcher is running.
 
 ## On the server
 
