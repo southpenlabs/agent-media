@@ -7959,6 +7959,13 @@ a desktop. Code: `screens.py`; tests in `test_screens.py`. Design:
   (`AudioBackend.own_voice`), resumes only what it paused and is still
   paused, and plays on if the server is unreachable for 3 s while paused.
   Mac has no public API for other apps' media: not supported.
+  It also pauses while **this computer's own microphone** is open (with the
+  switch on): dictation, Win+H, a browser's mic (David, 28 Nov 2026: "Can we
+  also make it pause for dictation"), read from Windows' privacy store
+  (CapabilityAccessManager, `LastUsedTimeStop` 0; WSL's mic is `msrdc.exe`)
+  or PulseAudio/PipeWire's recording streams. `MEDIA_SCREEN_MIC_IGNORE`
+  (names, commas) leaves out an app that holds the mic for good;
+  `MEDIA_SCREEN_MIC=0` turns it off.
 
 ### 6.21g A device that follows a phone (built 3 Nov 2026)
 

@@ -103,3 +103,45 @@ def test_run_once_asks_and_follows(monkeypatch):
     monkeypatch.setattr(sh, "ask", lambda rec: {"ok": True, "on": True, "pause": True})
     assert sh.run({"url": "https://s.example", "token": "x"}, backend=b, once=True) == 0
     assert b.paused == ["firefox"] and b.resumed == ["firefox"]
+
+
+def test_dictation_on_this_computer_pauses_too(monkeypatch):
+    b = FakeBackend(["firefox"])
+    answers = iter([{"on": True, "pause": False}] * 3)
+    mics = iter([[], ["msrdc.exe"], []])
+    monkeypatch.setattr(sh, "ask", lambda rec: next(answers))
+    steps = []
+
+    class Spy(sh.Ducker):
+        def step(self, pause):
+            steps.append(pause)
+            super().step(pause)
+
+    monkeypatch.setattr(sh, "Ducker", Spy)
+    n = {"i": 0}
+
+    def sleep(_):
+        n["i"] += 1
+        if n["i"] >= 3:
+            raise KeyboardInterrupt
+
+    sh.run({"url": "u", "token": "t"}, backend=b, sleep=sleep, mic=lambda: next(mics))
+    assert steps == [False, True, False]
+    assert b.paused == ["firefox"] and b.resumed == ["firefox"]
+
+
+def test_switch_off_ignores_the_mic(monkeypatch):
+    b = FakeBackend(["firefox"])
+    monkeypatch.setattr(sh, "ask", lambda rec: {"on": False, "pause": False})
+    sh.run({"url": "u", "token": "t"}, backend=b, once=True, mic=lambda: ["chrome.exe"])
+    assert b.paused == []
+
+
+def test_mic_ignore_and_off(monkeypatch):
+    monkeypatch.setattr(sh.os, "name", "posix")
+    monkeypatch.setattr(sh.sys, "platform", "linux")
+    monkeypatch.setattr(sh, "_linux_mic_users", lambda: ["pulseaudio.exe", "arecord"])
+    monkeypatch.setenv("MEDIA_SCREEN_MIC_IGNORE", "PulseAudio")
+    assert sh.mic_users() == ["arecord"]
+    monkeypatch.setenv("MEDIA_SCREEN_MIC", "0")
+    assert sh.mic_users() == []

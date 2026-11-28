@@ -29,7 +29,6 @@ import argparse
 import json
 import logging
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -193,27 +192,135 @@ class Ducker:
         self.holding = False
 
 
+# --- this computer's own microphone ------------------------------------
+#
+# Dictation on the computer itself (hpo's Super+Insert voice typing, Windows'
+# Win+H, a browser's mic) pauses it too (David, 28 Nov 2026: "Can we also make
+# it pause for dictation"). Not one dictation tool wired in, but the mic being
+# open at all, as the OS reports it: Windows keeps it per app in the privacy
+# store (CapabilityAccessManager, LastUsedTimeStop 0 = in use; WSL's mic shows
+# as msrdc.exe), PulseAudio/PipeWire as recording streams. An app that holds
+# the mic for good is left out with MEDIA_SCREEN_MIC_IGNORE (names, commas);
+# MEDIA_SCREEN_MIC=0 turns this off.
+
+_MIC_KEY = (r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager"
+            r"\ConsentStore\microphone")
+
+
+def _mic_ignored(name: str) -> bool:
+    raw = os.environ.get("MEDIA_SCREEN_MIC_IGNORE", "")
+    low = name.lower()
+    return any(x.strip() and x.strip().lower() in low for x in raw.split(","))
+
+
+def _windows_mic_users() -> list[str]:
+    import winreg  # type: ignore[import-not-found,unused-ignore]
+
+    users: list[str] = []
+
+    def walk(key, path: str) -> None:
+        i = 0
+        while True:
+            try:
+                sub = winreg.EnumKey(key, i)
+            except OSError:
+                break
+            i += 1
+            try:
+                with winreg.OpenKey(key, sub) as k:
+                    try:
+                        stop, _ = winreg.QueryValueEx(k, "LastUsedTimeStop")
+                        start, _ = winreg.QueryValueEx(k, "LastUsedTimeStart")
+                        if int(stop) == 0 and int(start) != 0:
+                            users.append(sub.replace("#", "\\"))
+                    except OSError:
+                        pass
+                    walk(k, path + "\\" + sub)
+            except OSError:
+                continue
+
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _MIC_KEY) as root:
+        walk(root, _MIC_KEY)
+    return users
+
+
+def _linux_mic_users() -> list[str]:
+    try:
+        r = subprocess.run(["pactl", "-f", "json", "list", "source-outputs"],
+                           capture_output=True, text=True, timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if r.returncode != 0:
+        return []
+    try:
+        rows = json.loads(r.stdout or "[]")
+    except ValueError:
+        return []
+    users = []
+    for row in rows if isinstance(rows, list) else []:
+        props = row.get("properties") or {}
+        # A level meter or a monitor of an output is not someone talking.
+        if str(props.get("media.role", "")).lower() == "production" or \
+                str(row.get("source", "")).endswith(".monitor"):
+            continue
+        users.append(str(props.get("application.process.binary")
+                         or props.get("application.name") or "?"))
+    return users
+
+
+def mic_users() -> list[str]:
+    """The apps holding this computer's microphone now (ignored ones left out)."""
+    if os.environ.get("MEDIA_SCREEN_MIC", "1").strip() in ("0", "false", "no", "off"):
+        return []
+    try:
+        if os.name == "nt":
+            got = _windows_mic_users()
+        elif sys.platform.startswith("linux"):
+            got = _linux_mic_users()
+        else:
+            return []
+    except Exception as e:  # noqa: BLE001 - no mic answer is no mic pause
+        _failures.swallowed(e)
+        return []
+    return [u for u in got if not _mic_ignored(u)]
+
+
 def run(rec: dict, backend=None, sleep: Callable[[float], None] = time.sleep,
-        once: bool = False) -> int:
+        once: bool = False, mic: Callable[[], list[str]] = mic_users) -> int:
     if backend is None:
         from .audio_backend import backend as _backend
         backend = _backend()
     d = Ducker(backend)
     last_err = None
+    on = False
+    last_mic: list[str] = []
     log.info("screen ducker started (%s, %s backend)", rec["url"], backend.name)
     while True:
+        server: Optional[bool]
         try:
             got = ask(rec)
             last_err = None
-            d.step(bool(got.get("pause")))
-            wait = POLL_ON_S if got.get("on") else POLL_OFF_S
+            on = bool(got.get("on"))
+            server = bool(got.get("pause"))
         except ScreenError as e:
             if str(e) != last_err:
                 log.warning("%s", e)
                 last_err = str(e)
-            d.step(None)
+            server = None
+        # The switch governs the mic too: off is off.
+        users = mic() if on else []
+        if users != last_mic:
+            if users:
+                log.info("microphone in use by %s", users)
+            else:
+                log.info("microphone free")
+            last_mic = users
+        d.step(True if users else server)
+        if server is None:
             # Keep asking quickly while something is paused, so it fails open on time.
-            wait = POLL_ON_S if d.holding else POLL_ERR_S
+            wait = POLL_ON_S if (d.holding or on) else POLL_ERR_S
+        else:
+            wait = POLL_ON_S if on else POLL_OFF_S
         if once:
             d.release()
             return 0
