@@ -509,7 +509,8 @@ def unused_for(device: dict) -> float | None:
     another server's, not a person's device: never."""
     from . import device_kinds
 
-    if is_jobs_worker(device) or is_search_peer(device) or is_reply_peer(device):
+    if (is_jobs_worker(device) or is_search_peer(device) or is_reply_peer(device)
+            or is_speaking_peer(device)):
         return None
     rule = device_kinds.rules_for(device).get("forget_unused") or {}
     s = _UNUSED_S.get(str(rule.get("value") or ""))
@@ -745,7 +746,8 @@ CARRIED = ("kind", "kind_set_by", "rule_overrides", "pause_here", "pause_for",
 
 def _server_token(d: dict) -> bool:
     """Another server's or worker's token, never one person's device."""
-    return bool(d.get("jobs") or d.get("search") or d.get("reply") or d.get("sessions"))
+    return bool(d.get("jobs") or d.get("search") or d.get("reply") or d.get("sessions")
+                or d.get("speaking"))
 
 
 def claim_install(device_id: str, install, now: float | None = None) -> list[str]:
@@ -1083,6 +1085,45 @@ def is_reply_peer(device: dict | None) -> bool:
     return bool((device or {}).get("reply"))
 
 
+def is_speaking_peer(device: dict | None) -> bool:
+    """A speaking-only device (`pair --device NAME --speaking`): another
+    server saying when it is reading a reply out, so this one's screens
+    pause for replies of the threads it hosts (screens.elsewhere, §6.21f).
+    Its token may POST /screen/elsewhere and opens no other route."""
+    return bool((device or {}).get("speaking"))
+
+
+def install_hash(device: dict | None) -> str:
+    """sha256 of a device's app install id (`claim_install`), "" without one:
+    what a speaking peer names its player by, so the id itself never leaves
+    the server that holds it."""
+    install = str((device or {}).get("install") or "")
+    return hashlib.sha256(install.encode()).hexdigest() if install else ""
+
+
+def by_install_hash(digest: str) -> str:
+    """The id of the device here whose install id hashes to `digest`, or ""."""
+    if not digest:
+        return ""
+    with _LOCK:
+        rows = _load()
+    for d in rows:
+        if install_hash(d) and hmac.compare_digest(install_hash(d), digest):
+            return str(d.get("id") or "")
+    return ""
+
+
+def player_ref(device_id: str) -> dict | None:
+    """What a speaking peer says plays its voice: {"name", "install_hash"}
+    of the device `device_id`, or None for no such device."""
+    with _LOCK:
+        rows = _load()
+    hit = next((d for d in rows if d.get("id") == device_id), None)
+    if hit is None:
+        return None
+    return {"name": str(hit.get("name") or ""), "install_hash": install_hash(hit)}
+
+
 def is_session_worker(device: dict | None) -> bool:
     """A jobs worker that may also run agent sessions sent down its stream
     (phone_jobs.session, roadmap 56): only with the jobs bit too, so the
@@ -1092,7 +1133,7 @@ def is_session_worker(device: dict | None) -> bool:
 
 def mint_code(name: str, enrol: bool = False, jobs: bool = False,
               role: str = "", sessions: bool = False,
-              search: bool = False, reply: bool = False,
+              search: bool = False, reply: bool = False, speaking: bool = False,
               expires_at: float | None = None) -> tuple[str, float]:
     """A fresh pairing code for a device called `name`: `(code, expires)`.
 
@@ -1131,6 +1172,10 @@ def mint_code(name: str, enrol: bool = False, jobs: bool = False,
             # Another server's reply to a chat that is this one's and frozen
             # there (`pair --reply`, archived chats step 3).
             codes[code]["reply"] = True
+        if speaking and not jobs:
+            # Another server saying when it reads a reply out (`pair
+            # --speaking`): this one's screens pause for it.
+            codes[code]["speaking"] = True
         if role:
             codes[code]["role"] = role
         if expires_at is not None:
@@ -1200,6 +1245,8 @@ def redeem(code: str, device: str, ip: str = "") -> dict | None:
             row["search"] = True
         if entry.get("reply") and not row.get("jobs"):
             row["reply"] = True
+        if entry.get("speaking") and not row.get("jobs"):
+            row["speaking"] = True
         if entry.get("role") in ROLES:
             row["role"] = entry["role"]
         if isinstance(entry.get("device_expires_at"), (int, float)):
@@ -1209,7 +1256,8 @@ def redeem(code: str, device: str, ip: str = "") -> dict | None:
     return {"token": token, "device_id": row["id"], "name": name,
             "enrol": may_enrol(row), "jobs": bool(row.get("jobs")), "role": role_of(row),
             **({"search": True} if row.get("search") else {}),
-            **({"reply": True} if row.get("reply") else {})}
+            **({"reply": True} if row.get("reply") else {}),
+            **({"speaking": True} if row.get("speaking") else {})}
 
 
 #: Fields that never leave the store: the token's hash, an account's
@@ -1468,6 +1516,7 @@ def cli_devices(argv: list[str]) -> int:
               f"{'  [jobs worker]' if is_jobs_worker(d) else ''}"
               f"{'  [search peer]' if is_search_peer(d) else ''}"
               f"{'  [reply peer]' if is_reply_peer(d) else ''}"
+              f"{'  [speaking peer]' if is_speaking_peer(d) else ''}"
               f"{'  [sessions]' if is_session_worker(d) else ''}"
               f"{'  account ' + d['account'] if d.get('account') else ''}"
               f"{'  [replaced by ' + d['likely_replaced_by'] + ']' if d.get('likely_replaced_by') else ''}"

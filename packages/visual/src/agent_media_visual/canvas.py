@@ -586,10 +586,16 @@ def _cmd_pair(argv: list[str]) -> int:
                          "one's chats that are frozen there (media peer pair there). "
                          "Its token may POST /reply and opens no other route; "
                          "with --search, both")
+    ap.add_argument("--speaking", action="store_true",
+                    help="with --device: another server saying when it reads a reply "
+                         "out, so this one's screens pause for the threads it hosts "
+                         "(media peer pair there). Its token may POST /screen/elsewhere "
+                         "and opens no other route")
     args = ap.parse_args(argv)
-    if (args.search or args.reply) and (args.device is None or args.jobs or args.enrol
+    if (args.search or args.reply or args.speaking) and (args.device is None or args.jobs or args.enrol
                                         or args.role):
-        print("pair: --search and --reply go with --device NAME alone", file=sys.stderr)
+        print("pair: --search, --reply and --speaking go with --device NAME alone",
+              file=sys.stderr)
         return 2
     if args.sessions and not args.jobs:
         print("pair: --sessions goes with --jobs", file=sys.stderr)
@@ -620,7 +626,8 @@ def _cmd_pair(argv: list[str]) -> int:
         return _cmd_pair_device(args.device, args.host, args.port, enrol=args.enrol,
                                 server=args.server, tunnelled=tunnelled, lookup=lookup,
                                 jobs=args.jobs, role=args.role, sessions=args.sessions,
-                                search=args.search, reply=args.reply)
+                                search=args.search, reply=args.reply,
+                                speaking=args.speaking)
 
     if not _host_token():
         print("no host key on this host (media-visual-canvas makes one when it starts) — nothing to pair.",
@@ -643,7 +650,7 @@ def _cmd_pair_device(name: str, host: str, port: int, enrol: bool = False,
                      server: str = "", tunnelled: bool = False,
                      lookup: str = "", jobs: bool = False, role: str = "",
                      sessions: bool = False, search: bool = False,
-                     reply: bool = False) -> int:
+                     reply: bool = False, speaking: bool = False) -> int:
     """`pair --device NAME`: a code the app trades for a device token at
     `POST /pair`. The code lives in the server package's own store
     (agent_media_server.devices), NOT the spool's `pair-code` above — the two
@@ -656,11 +663,13 @@ def _cmd_pair_device(name: str, host: str, port: int, enrol: bool = False,
         print("--device needs a name, e.g. --device \"Pixel 8a\"", file=sys.stderr)
         return 2
     code, _expires = _devices.mint_code(name, enrol=enrol, jobs=jobs, role=role,
-                                        sessions=sessions, search=search, reply=reply)
+                                        sessions=sessions, search=search, reply=reply,
+                                        speaking=speaking)
     app_link, web_link = _devices.links(code, host, port, server, lookup)
-    if search or reply:
+    if search or reply or speaking:
         # Another server's command line takes this one, not the app.
-        what = " and ".join(w for w, on in (("search", search), ("reply", reply)) if on)
+        what = " and ".join(w for w, on in (("search", search), ("reply", reply),
+                                            ("speaking", speaking)) if on)
         print(f"\n  Pair {name!r} as a {what} peer (valid {_devices.pair_ttl() // 60} min, "
               "one-time). On the server that should search here, run:\n")
         print(f"    media peer pair <a name for this server> '{app_link}'\n")
@@ -669,6 +678,9 @@ def _cmd_pair_device(name: str, host: str, port: int, enrol: bool = False,
         if reply:
             print("  A reply there to one of this server's chats (frozen there) is\n"
                   "  passed on here and continued on this machine.")
+        if speaking:
+            print("  Its server then says here when it reads a reply out, and this\n"
+                  "  server's screens (pause here) pause for it as for their own.")
         print("  Give --server this server's public https address when pairing.\n")
         return 0
     if jobs:
@@ -2571,6 +2583,11 @@ def main() -> None:
     from agent_media_server import speech_frames as _speech_frames
     for _ch in _speech_frames.CHANNELS:
         _speech_frames.start(channel=_ch)
+    # Other servers told when this one reads a reply out, so their screens
+    # pause for the threads it hosts (speaking_peers.py, agent-mail #1440):
+    # idle until a speaking link is paired (media peer pair).
+    from agent_media_server import speaking_peers as _speaking_peers
+    _speaking_peers.start()
     # The Videos tab's index of each YouTube account's subscriptions
     # (agent_media_core.videos_index, §6.70): started here so it builds
     # without waiting for the account list to be opened; nothing without

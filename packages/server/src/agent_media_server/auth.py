@@ -57,7 +57,8 @@ def _device(bearer: str) -> dict | None:
     another host's worker token takes jobs down its stream and is no way in
     to anything else (it is refused like an unknown token)."""
     dev = devices.lookup(bearer, getattr(_REQ, "ip", ""))
-    if devices.is_jobs_worker(dev) or devices.is_search_peer(dev) or devices.is_reply_peer(dev):
+    if (devices.is_jobs_worker(dev) or devices.is_search_peer(dev) or devices.is_reply_peer(dev)
+            or devices.is_speaking_peer(dev)):
         return None
     return dev
 
@@ -70,6 +71,14 @@ def reply_peer(bearer: str) -> tuple[dict | None, dict]:
     if not devices.is_reply_peer(dev):
         return None, _unknown()
     return {**_owner(dev), "peer": str(dev.get("name") or "peer")}, {}
+
+
+def speaking_peer(bearer: str) -> dict | None:
+    """The device row when this bearer is another server saying it is
+    reading a reply out (`pair --speaking`): let into POST /screen/elsewhere
+    only (screens.elsewhere). None for any other token."""
+    dev = devices.lookup(bearer, getattr(_REQ, "ip", ""))
+    return dev if devices.is_speaking_peer(dev) else None
 
 
 def search_peer(bearer: str) -> bool:

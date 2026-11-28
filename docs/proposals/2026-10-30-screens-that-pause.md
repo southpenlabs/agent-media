@@ -97,6 +97,17 @@ Limit: Chrome shows Windows one media session at a time, so while
 Sasonica's is the one shown, a YouTube tab in the same Chrome cannot be
 paused; another app can.
 
+### Replies another server reads out (28 Nov 2026)
+
+hpo's helper is paired with red2, and a reply in a thread red5 hosts is read
+through red5's own server, so hpo played on through it (agent-mail #1440).
+Two ways were open: the helper asks every server of the setup, or the
+server reading a reply out tells the others. The second was built: a screen
+pairs once, with its home server, and any number of servers can be heard
+through it, each paired there as a speaking peer (`pair --speaking`, `media
+peer pair`); the rule (at home, the hold, the resume) stays in one place.
+Contract §6.21f, `speaking_peers.py`, `screens.elsewhere`.
+
 ## Away from home
 
 If David talks to the assistant on the bus, should the living-room TV pause

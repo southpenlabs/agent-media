@@ -422,6 +422,18 @@ def playing_device(channel: str = "speech") -> str | None:
     return _HUBS[channel].device()
 
 
+def busy(channel: str = "speech") -> bool | None:
+    """Whether the device playing `channel` is playing something now (not
+    idle, not paused), as this server believes; None when no device plays
+    it here (this host's own players, or the hub not running)."""
+    hub = _HUBS[channel]
+    if hub.device() is None:
+        return None
+    with hub.lock:
+        m = hub.model
+        return not m.idle and not m.paused and m.path() is not None
+
+
 def output_device(channel: str) -> str | None:
     """Explicit destination, persisted separately for speech and music."""
     from agent_media_core._paths import state_dir

@@ -18,6 +18,16 @@ TV's app and a desktop helper only pause and resume:
   pause for speech"); a `dur` not yet known waits out the hold.
 - Resumed RESUME_AFTER_S after both have stopped.
 
+Another server's replies count too (28 Nov 2026, agent-mail #1440: hpo did
+not pause for a reply in a thread red5 hosts, read through red5's own
+server): a server paired here as a speaking peer (`pair --speaking`) posts
+its speech state to `POST /screen/elsewhere` (`elsewhere`, sent by
+speaking_peers.py there), and a fresh one that is speaking counts as this
+host's own would. Its player is matched to a device here by the hash of its
+app install id, else by name; unmatched, it counts as this host's own
+players do. A state older than ELSEWHERE_FRESH_S is not speaking, so a lost
+"stopped" never holds a screen paused.
+
 Only for a phone that is **at home**, meaning on the screen's network: the
 same public address as the screen's request, so the living-room TV does not
 pause for David talking on the bus. A device reaching this server over the
@@ -46,8 +56,15 @@ SEEN_WITHIN_S = 900.0
 _TAILNET = ipaddress.ip_network("100.64.0.0/10")
 _TAILNET_TTL_S = 30.0
 
+#: A speaking peer's state older than this is not speaking (it posts each
+#: second while speaking, and once when it stops).
+ELSEWHERE_FRESH_S = 3.0
+
 _LOCK = threading.Lock()
 _SCREENS: dict[str, dict] = {}
+#: Speaking peer's device id → {"at" (monotonic), "speaking", "thinking",
+#: "dur", "player": {"name", "install_hash"} | None}.
+_ELSEWHERE: dict[str, dict] = {}
 _PEERS: dict = {"at": None, "map": {}}
 
 
@@ -210,6 +227,60 @@ def _ago(s: float) -> str:
     return f"{s / 86400:.0f} days"
 
 
+def _norm_name(name) -> str:
+    return "".join(c for c in str(name or "").lower() if c.isalnum())
+
+
+def elsewhere(bearer: str, body: dict) -> tuple[bool, dict]:
+    """`POST /screen/elsewhere {speaking, thinking?, dur?, player?: {name,
+    install_hash}}`: another server (a speaking peer, `pair --speaking`)
+    says whether it is reading a reply out now. Any other token is refused
+    like an unknown one."""
+    dev = auth.speaking_peer(bearer)
+    if not dev:
+        return False, {"status": 401, "error": "a speaking peer only (pair --speaking)"}
+    if not isinstance(body, dict):
+        return False, {"status": 400, "error": "a JSON object"}
+    player = body.get("player") if isinstance(body.get("player"), dict) else None
+    try:
+        dur = float(body["dur"]) if body.get("dur") is not None else None
+    except (TypeError, ValueError):
+        dur = None
+    got = {"at": time.monotonic(), "speaking": body.get("speaking") is True,
+           "thinking": body.get("thinking") is True, "dur": dur,
+           "player": ({"name": str(player.get("name") or "")[:80],
+                       "install_hash": str(player.get("install_hash") or "")[:64]}
+                      if player else None)}
+    with _LOCK:
+        _ELSEWHERE[str(dev.get("id"))] = got
+    return True, {}
+
+
+def _elsewhere_now() -> list[dict]:
+    """The speaking peers' fresh states that are a voice (speaking, not a
+    thinking read-out)."""
+    t = time.monotonic()
+    with _LOCK:
+        states = list(_ELSEWHERE.values())
+    return [e for e in states if t - e["at"] <= ELSEWHERE_FRESH_S
+            and e["speaking"] and not e["thinking"]]
+
+
+def _peer_player(e: dict, rows: dict) -> dict | None:
+    """The device here that plays a peer's voice: by install hash, then by
+    name ignoring case and punctuation; None when neither matches."""
+    p = e.get("player") or {}
+    hit = devices.by_install_hash(p.get("install_hash") or "")
+    if hit and hit in rows:
+        return rows[hit]
+    name = _norm_name(p.get("name"))
+    if name:
+        same = [d for d in rows.values() if _norm_name(d.get("name")) == name]
+        if len(same) == 1:
+            return same[0]
+    return None
+
+
 def now(bearer: str, state: dict, helper: str = "") -> tuple[bool, dict]:
     """`GET /screen/now` → `{on, pause, why}`: whether the asking device
     should be paused now. `state` is the speech snapshot (/speech/now's);
@@ -226,18 +297,27 @@ def now(bearer: str, state: dict, helper: str = "") -> tuple[bool, dict]:
             _SCREENS.pop(me, None)
         return True, {"on": False, "pause": False, "why": None}
     here = place(auth.client_ip())
-    mic = voice = False
+    mic = voice = long_ = False
     if here:
         mic = any(_counts(screen, rows.get(d)) and place(ip) == here
                   for d, ip in mic_state.open_mics().items())
+
+        def heard(player: dict | None) -> bool:
+            if player:
+                return _counts(screen, player) and _seen_here(player, here)
+            # This host's own players (the rooms), or a peer's we cannot
+            # place: heard wherever they are, so it counts while one of the
+            # screen's phones is home.
+            return any(_counts(screen, d) and _seen_here(d, here) for d in rows.values())
+
         if state.get("speaking") and not state.get("thinking"):
             player = speech_frames.playing_device("speech")
-            if player:
-                voice = _counts(screen, rows.get(player)) and _seen_here(rows.get(player), here)
-            else:
-                # This host's own players (the rooms): heard wherever they
-                # are, so it counts while one of the screen's phones is home.
-                voice = any(_counts(screen, d) and _seen_here(d, here) for d in rows.values())
+            if (bool(rows.get(player)) and heard(rows[player])) if player else heard(None):
+                voice, long_ = True, _long(state)
+        for e in _elsewhere_now():
+            if heard(_peer_player(e, rows)):
+                voice = True
+                long_ = long_ or _long(e)
     t = time.monotonic()
     with _LOCK:
         st = _SCREENS.setdefault(me, {"speak_since": None, "paused": False,
@@ -246,7 +326,7 @@ def now(bearer: str, state: dict, helper: str = "") -> tuple[bool, dict]:
         if voice:
             if st["speak_since"] is None:
                 st["speak_since"] = t
-            if st["paused"] or t - st["speak_since"] >= SPEAK_HOLD_S or _long(state):
+            if st["paused"] or t - st["speak_since"] >= SPEAK_HOLD_S or long_:
                 why = why or "reply"
         else:
             st["speak_since"] = None
@@ -264,4 +344,5 @@ def _reset() -> None:
     """Tests: forget every screen's state and the tailnet map."""
     with _LOCK:
         _SCREENS.clear()
+        _ELSEWHERE.clear()
         _PEERS.update(at=None, map={})

@@ -150,6 +150,9 @@ def pair(name: str, link: str, server: str = "") -> dict:
            # One that may pass on replies (`pair --reply` there): a chat that is
            # that server's and frozen here is continued there.
            **({"reply": True} if got.get("reply") else {}),
+           # One that hears when this server reads a reply out (`pair
+           # --speaking` there): its screens pause for this one's replies.
+           **({"speaking": True} if got.get("speaking") else {}),
            **({"server_id": got["server_id"]} if got.get("server_id") else {}),
            "paired_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     path = _file(alias)
@@ -181,6 +184,18 @@ def reply_link(host: str) -> "Optional[dict]":
         if want in {n.split(".")[0].lower() for n in names if n}:
             return got
     return None
+
+
+def speaking_links() -> list[dict]:
+    """Every stored link to a server that hears when this one reads a reply
+    out (`pair --speaking` there; screen_elsewhere): {"alias", "url",
+    "token"}."""
+    out = []
+    for row in links():
+        got = load(row["alias"]) if row.get("paired") else None
+        if got and got.get("speaking"):
+            out.append({"alias": got["alias"], "url": got["url"], "token": got["token"]})
+    return out
 
 
 def links() -> list[dict]:

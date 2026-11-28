@@ -7981,6 +7981,25 @@ a desktop. Code: `screens.py`; tests in `test_screens.py`. Design:
   the sha256, installs into its own venv, and starts again; `media screen
   update` does it by hand. Only an installed helper updates, not a
   checkout; `MEDIA_SCREEN_UPDATE=0` turns it off.
+- **Another server's replies (28 Nov 2026, agent-mail #1440).** A reply in
+  a thread another server hosts is read through that server (red5's small
+  server, for a chat on red5), so this one's speech state never shows it.
+  That server is paired here as a **speaking peer**: `media-visual-canvas
+  pair --device NAME --speaking` here, then `media peer pair <alias>
+  '<link>'` there (the link is stored with `speaking: true`). Its token
+  opens only `POST /screen/elsewhere {"speaking": bool, "thinking"?: bool,
+  "dur"?: s, "player"?: {"name", "install_hash"}}` → `{ok}` (401 for any
+  other token). `GET /screen/now` then counts a peer's state as this host's
+  own voice while it is fresher than 3 s (`ELSEWHERE_FRESH_S`), speaking
+  and not thinking, with the same hold, long-clip and resume rules. Its
+  player is the device here whose app install id hashes (sha256) to
+  `install_hash`, else the one device of that name ignoring case and
+  punctuation; that device must be at home, as above. A player not placed
+  counts as this host's own players do (while a counted phone is home).
+  The sending server (`speaking_peers.py`) posts on every change and each
+  second while speaking; it takes a speech snapshot only while its frames
+  hub's player is playing, and every 5 s otherwise; nothing without a
+  speaking link. Tests in `test_screen_elsewhere.py`.
 
 ### 6.21g A device that follows a phone (built 3 Nov 2026)
 

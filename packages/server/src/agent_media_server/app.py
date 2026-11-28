@@ -442,6 +442,8 @@ except /pair, which is how a device gets its token):
                   /map/street_photos/along?
                   points=lat,lon[,heading];… → one per route turn, Panoramax
                   only (map_street_photos.py, §6.50)
+  POST /screen/elsewhere {speaking, thinking?, dur?, player?} → another
+                  server (pair --speaking) says it reads a reply out (§6.21f)
   GET  /screen/now → {on, pause, why}: should this device pause what is
                   playing on it now (screens.py, §6.21f); POST /devices/pause
                   {id, on, for?} sets its switch (an admin, like a role)
@@ -3765,7 +3767,8 @@ def _pair(h: BaseHTTPRequestHandler) -> None:
                    # pair` checks it; the app's answer is unchanged.
                    **({"jobs": True} if got.get("jobs") else {}),
                    **({"search": True} if got.get("search") else {}),
-                   **({"reply": True} if got.get("reply") else {})})
+                   **({"reply": True} if got.get("reply") else {}),
+                   **({"speaking": True} if got.get("speaking") else {})})
 
 
 def _services_restart(h: BaseHTTPRequestHandler) -> None:
@@ -4703,6 +4706,14 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         _devices_rename(h)
     elif path == "/devices/pause":
         _devices_pause(h)
+    elif path == "/screen/elsewhere":
+        # Another server (a speaking peer, `pair --speaking`) saying whether
+        # it is reading a reply out: this one's screens pause for it too
+        # (screens.elsewhere, §6.21f).
+        from . import screens
+
+        ok, detail = screens.elsewhere(_bearer(h), _read_json(h) or {})
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/devices/follow":
         _devices_follow(h)
     elif path == "/devices/kind":
