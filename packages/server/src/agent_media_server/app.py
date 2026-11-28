@@ -541,7 +541,7 @@ CORS_PATHS = frozenset({
     "/contacts/import", "/contacts/timeline/backfill", "/contacts/export.vcf", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply", "/mail/threads", "/mail/tag", "/mail/remote/search", "/mail/remote/fetch", "/mail/move",
     "/mic/ask", "/mic/cancel", "/mic/answer",
-    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/location/history", "/device/places/watch", "/device/places/cross", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
+    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/location/history", "/device/places/watch", "/device/places/cross", "/device/mic", "/screen/now", "/screen/helper", "/screen/helper/wheel", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
     "/notes", "/notes/clear", "/usage/alerts/check",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
@@ -3474,6 +3474,25 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = screens.now(_bearer(h), speech.current_state())
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path in ("/screen/helper", "/screen/helper/wheel"):
+        # The desktop pause helper's updates (screen_dist.py): the version
+        # of the core wheel this release hands out, or its bytes.
+        from . import screen_dist
+
+        ok, detail = screen_dist.info(_bearer(h))
+        if not ok:
+            _json(h, detail.pop("status", 404), {"ok": False, **detail})
+        elif path == "/screen/helper":
+            _json(h, 200, {"ok": True, **detail})
+        else:
+            w = screen_dist.wheel()
+            if w is None:
+                _json(h, 404, {"ok": False, "error": "no_release"})
+            else:
+                _send_file(h, w["path"], w["size"], "application/octet-stream",
+                           {"Cache-Control": "private, no-store",
+                            "Content-Disposition": f'attachment; filename="{w["path"].name}"',
+                            "X-Wheel-Sha256": w["sha256"], "X-Wheel-Version": w["version"]})
     elif path == "/speech/recent":
         # The full player's Recent replies: every thread's, newest first (speech.speech_recent).
         ok, detail = speech.speech_recent(_bearer(h), (parse_qs(query).get("limit") or [None])[0])

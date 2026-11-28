@@ -29,6 +29,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -285,8 +286,107 @@ def mic_users() -> list[str]:
     return [u for u in got if not _mic_ignored(u)]
 
 
+# --- updating itself ------------------------------------------------------
+#
+# David, 28 Nov 2026: "Make it update itself". The paired server hands out
+# the core wheel of the release it runs (GET /screen/helper, /wheel;
+# agent-media-server screen_dist.py). Checked a minute after start and every
+# UPDATE_EVERY_S; a new version is downloaded, its sha256 checked, installed
+# into this venv, and the helper starts again. Only a helper installed from a
+# wheel updates (an editable checkout is left alone); MEDIA_SCREEN_UPDATE=0
+# turns it off.
+
+UPDATE_FIRST_S = 60.0
+UPDATE_EVERY_S = 6 * 3600.0
+_NO_WINDOW = 0x08000000           # CREATE_NO_WINDOW
+_DETACHED = 0x00000008 | 0x00000200   # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+
+
+def _version_path() -> Path:
+    return conf_path().with_name("screen-version")
+
+
+def installed_version() -> str:
+    try:
+        return _version_path().read_text().strip()
+    except OSError:
+        return ""
+
+
+def may_update() -> bool:
+    if os.environ.get("MEDIA_SCREEN_UPDATE", "1").strip() in ("0", "false", "no", "off"):
+        return False
+    here = Path(__file__).resolve()
+    return Path(sys.prefix).resolve() in here.parents   # installed, not a checkout
+
+
+def _console_python() -> str:
+    exe = Path(os.path.abspath(sys.executable))
+    if exe.name.lower() == "pythonw.exe" and exe.with_name("python.exe").exists():
+        return str(exe.with_name("python.exe"))
+    return str(exe)
+
+
+def _install_cmds(wheel: Path) -> list[list[str]]:
+    py = _console_python()
+    try:
+        import pip  # noqa: F401
+        base = [py, "-m", "pip", "install", "--disable-pip-version-check", "-q"]
+    except ImportError:
+        uv = shutil.which("uv") or str(Path.home() / ".local" / "bin" / "uv")
+        base = [uv, "pip", "install", "--python", py, "-q"]
+    # The same version number every build: forced in, then its dependencies met.
+    return [base + ["--force-reinstall", "--no-deps", str(wheel)], base + [str(wheel)]]
+
+
+def check_update(rec: dict, run_cmd: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> bool:
+    """Install the server's newer helper, if there is one. True when installed."""
+    import hashlib
+    import tempfile
+
+    status, got = _http(rec["url"] + "/screen/helper", token=rec["token"], timeout=600)
+    if status != 200 or not got.get("version"):
+        if status != 404:   # 404: the server runs no release; nothing to hand out
+            log.info("update check: %s %s", status, got.get("error") or "")
+        return False
+    ver = str(got["version"])
+    if ver == installed_version():
+        return False
+    req = urllib.request.Request(rec["url"] + "/screen/helper/wheel",
+                                 headers={"User-Agent": UA, "Authorization": f"Bearer {rec['token']}"})
+    with urllib.request.urlopen(req, timeout=600) as r:
+        data = r.read()
+        name = (r.headers.get("Content-Disposition") or "").partition('filename="')[2].rstrip('"')
+    if hashlib.sha256(data).hexdigest() != got.get("sha256"):
+        raise ScreenError("update: the wheel's sha256 does not match")
+    if not name.endswith(".whl"):
+        name = "agent_media_core-0.0.0-py3-none-any.whl"
+    with tempfile.TemporaryDirectory() as tmp:
+        whl = Path(tmp) / Path(name).name
+        whl.write_bytes(data)
+        kw = {"creationflags": _NO_WINDOW} if os.name == "nt" else {}
+        for c in _install_cmds(whl):
+            r2 = run_cmd(c, capture_output=True, text=True, timeout=900, **kw)
+            if r2.returncode != 0:
+                raise ScreenError(f"update: install failed: {(r2.stderr or r2.stdout)[-300:]}")
+    _version_path().parent.mkdir(parents=True, exist_ok=True)
+    _version_path().write_text(ver + "\n")
+    log.info("updated to %s", ver)
+    return True
+
+
+def _start_again() -> None:
+    """Hand over to a fresh process of the new code. Linux: systemd's
+    Restart=always does it once this one exits. Windows: start one, detached,
+    in this desktop session."""
+    if os.name == "nt":
+        subprocess.Popen(_self_cmd(windowless=True) + ["run"],
+                         creationflags=_DETACHED | _NO_WINDOW, close_fds=True)
+
+
 def run(rec: dict, backend=None, sleep: Callable[[float], None] = time.sleep,
-        once: bool = False, mic: Callable[[], list[str]] = mic_users) -> int:
+        once: bool = False, mic: Callable[[], list[str]] = mic_users,
+        updates: bool = True, clock: Callable[[], float] = time.monotonic) -> int:
     if backend is None:
         from .audio_backend import backend as _backend
         backend = _backend()
@@ -294,8 +394,19 @@ def run(rec: dict, backend=None, sleep: Callable[[float], None] = time.sleep,
     last_err = None
     on = False
     last_mic: list[str] = []
-    log.info("screen ducker started (%s, %s backend)", rec["url"], backend.name)
+    log.info("screen ducker started (%s, %s backend, version %s)", rec["url"],
+             backend.name, installed_version() or "unknown")
+    next_update = (clock() + UPDATE_FIRST_S) if (updates and may_update()) else None
     while True:
+        if next_update is not None and clock() >= next_update and not d.holding:
+            next_update = clock() + UPDATE_EVERY_S
+            try:
+                if check_update(rec):
+                    d.release()
+                    _start_again()
+                    return 0
+            except (ScreenError, OSError, ValueError, subprocess.SubprocessError) as e:
+                log.warning("update failed: %s", e)
         server: Optional[bool]
         try:
             got = ask(rec)
@@ -413,6 +524,7 @@ def add_args(p: argparse.ArgumentParser) -> None:
     ip = sub.add_parser("install", help="run at login (systemd user unit / logon task)")
     ip.add_argument("--dry-run", action="store_true")
     sub.add_parser("status", help="paired or not, and the server's answer now")
+    sub.add_parser("update", help="install the paired server's newer helper now, if any")
 
 
 def cmd(a) -> int:
@@ -438,8 +550,18 @@ def cmd(a) -> int:
         print("screen: not paired; run: media screen pair '<sasonica://pair link>'",
               file=sys.stderr)
         return 1
+    if a.screen_cmd == "update":
+        try:
+            done = check_update(conf)
+        except (ScreenError, OSError, subprocess.SubprocessError) as e:
+            print(f"screen update: {e}", file=sys.stderr)
+            return 1
+        print(f"updated to {installed_version()}; restart it (media screen install, or the task)"
+              if done else f"up to date ({installed_version() or 'unknown'})")
+        return 0
     if a.screen_cmd == "status":
-        print(f"paired with {conf['url']} as {conf.get('name')!r}")
+        print(f"paired with {conf['url']} as {conf.get('name')!r}; "
+              f"helper version {installed_version() or 'unknown'}")
         try:
             got = ask(conf)
         except ScreenError as e:

@@ -166,3 +166,75 @@ def test_a_failing_turn_does_not_end_the_loop(monkeypatch):
 
     assert sh.run({"url": "u", "token": "t"}, backend=b, sleep=sleep, mic=lambda: []) == 0
     assert Boom.calls == 3
+
+
+def test_update_installs_a_new_version_once(tmp_path, monkeypatch):
+    import hashlib
+    import io
+    import subprocess
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    data = b"a wheel"
+    sha = hashlib.sha256(data).hexdigest()
+    monkeypatch.setattr(sh, "_http", lambda url, body=None, token="", timeout=4.0, method="":
+                        (200, {"ok": True, "version": "v2", "sha256": sha, "size": len(data)}))
+
+    class Resp(io.BytesIO):
+        headers = {"Content-Disposition": 'attachment; filename="agent_media_core-0.0.0-py3-none-any.whl"'}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(sh.urllib.request, "urlopen", lambda req, timeout=0: Resp(data))
+    ran = []
+
+    def run_cmd(cmd, **kw):
+        ran.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    rec = {"url": "https://s.example", "token": "t"}
+    assert sh.check_update(rec, run_cmd) is True
+    assert sh.installed_version() == "v2"
+    assert len(ran) == 2 and "--force-reinstall" in ran[0]
+    assert sh.check_update(rec, run_cmd) is False   # already on it
+    assert len(ran) == 2
+
+
+def test_update_refuses_a_wheel_that_does_not_match(tmp_path, monkeypatch):
+    import io
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(sh, "_http", lambda *a, **k: (200, {"version": "v3", "sha256": "0" * 64}))
+
+    class Resp(io.BytesIO):
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(sh.urllib.request, "urlopen", lambda req, timeout=0: Resp(b"tampered"))
+    with pytest.raises(sh.ScreenError):
+        sh.check_update({"url": "https://s.example", "token": "t"}, lambda *a, **k: None)
+    assert sh.installed_version() == ""
+
+
+def test_run_checks_for_updates_and_hands_over(monkeypatch):
+    t = {"now": 0.0}
+    monkeypatch.setattr(sh, "may_update", lambda: True)
+    monkeypatch.setattr(sh, "ask", lambda rec: {"on": True, "pause": False})
+    monkeypatch.setattr(sh, "check_update", lambda rec: True)
+    handed = []
+    monkeypatch.setattr(sh, "_start_again", lambda: handed.append(1))
+
+    def sleep(s):
+        t["now"] += 30
+
+    assert sh.run({"url": "u", "token": "t"}, backend=FakeBackend([]), sleep=sleep,
+                  mic=lambda: [], clock=lambda: t["now"]) == 0
+    assert handed == [1] and t["now"] >= sh.UPDATE_FIRST_S

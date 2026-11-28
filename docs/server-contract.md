@@ -7970,6 +7970,17 @@ a desktop. Code: `screens.py`; tests in `test_screens.py`. Design:
   or PulseAudio/PipeWire's recording streams. `MEDIA_SCREEN_MIC_IGNORE`
   (names, commas) leaves out an app that holds the mic for good;
   `MEDIA_SCREEN_MIC=0` turns it off.
+  **It updates itself** (28 Nov 2026, David: "Make it update itself"):
+  `GET /screen/helper` (any paired device) → `{ok, version, sha256, size}`,
+  the agent-media-core wheel of the release this server runs (`version` its
+  commit, 12 characters; 404 `no_release` from a dev checkout), and `GET
+  /screen/helper/wheel` its bytes (headers `X-Wheel-Sha256`,
+  `X-Wheel-Version`). Built on the first ask per release (`uv build`) into
+  `<state>/screen-helper/<version>/` (`screen_dist.py`). The helper asks a
+  minute after it starts and every 6 hours while nothing is paused, checks
+  the sha256, installs into its own venv, and starts again; `media screen
+  update` does it by hand. Only an installed helper updates, not a
+  checkout; `MEDIA_SCREEN_UPDATE=0` turns it off.
 
 ### 6.21g A device that follows a phone (built 3 Nov 2026)
 
