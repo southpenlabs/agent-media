@@ -3921,6 +3921,12 @@ def _replay_row(row: dict, from_sentence: Optional[int] = None,
             replay_lock.release()
 
 
+def _note_unconfirmed() -> None:
+    """For media doctor: a replay the phone never confirmed (health_log)."""
+    from . import health_log
+    health_log.note("heard_unconfirmed")
+
+
 def _phone_confirmed(since: float) -> bool:
     """Has the player said anything since `since` (time.time())? A phone on
     speech frames is answered by the server's model of it, whose playhead runs
@@ -3938,12 +3944,16 @@ def _phone_confirmed(since: float) -> bool:
     except Exception as _exc:  # noqa: BLE001 — not a frames hub: its own word stands
         from .restart_services import _is_frames_hub
         if _is_frames_hub(sock):
+            _note_unconfirmed()
             return False
         _failures.swallowed(_exc)
         return True
     if not isinstance(at, (int, float)) or isinstance(at, bool):
         return True
-    return float(at) >= since
+    if float(at) >= since:
+        return True
+    _note_unconfirmed()
+    return False
 
 
 def _mark_heard(row_id: Optional[int]) -> None:
@@ -10880,6 +10890,66 @@ def _write_ledger(hosts: "list[str]", skewed: "list[str]",
         return 1
 
 
+def _doctor_quiet_failures(now: Optional[float] = None,
+                           builds: Optional[list] = None) -> list[tuple[bool, str]]:
+    """`(bad, "area: line")` for media doctor, from what was noted as it
+    happened. Each part is best effort on its own."""
+    from . import free, health_log
+
+    t = time.time() if now is None else now
+    out: list[tuple[bool, str]] = []
+    lost = [r for r in health_log.recent("restart_pickup", 86400, t) if not r.get("played")]
+    if lost:
+        rows = ", ".join(str(r.get("row")) for r in lost[-3:])
+        out.append((True, f"restart: {len(lost)} reply(s) picked up after a restart did not "
+                          f"play in the last day (rows {rows}); their Play has them"))
+    unconf = health_log.recent("heard_unconfirmed", 86400, t)
+    if len(unconf) >= 3:
+        out.append((False, f"heard: {len(unconf)} replays in the last day the phone never "
+                           "confirmed playing (left unheard; the phone's speech channel?)"))
+    devs = (free._load().get("devices") or {})
+    names = {}
+    try:
+        from agent_media_server import devices as _devices
+        rows_ = _devices.list_devices()
+        names = {d.get("id"): d.get("name") or d.get("id") for d in rows_}
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
+        rows_ = []
+    for dev, rep in (devs.items() if isinstance(devs, dict) else []):
+        if isinstance(rep, dict) and rep.get("mic_watch") is False \
+                and t - float(rep.get("at") or 0) < 86400:
+            out.append((True, f"phone: {names.get(dev, dev)!r}'s mic watcher is not running: "
+                              "dictation does not pause speech or screens (restart the app)"))
+    try:
+        if builds is None:
+            from agent_media_server import app_update
+            builds = app_update.builds()
+        newest = next((b for b in builds if "personal" in (b.get("apks") or {})), None)
+    except Exception as _exc:  # noqa: BLE001 — gh missing or offline: no line
+        _failures.swallowed(_exc)
+        newest = None
+    if newest:
+        from datetime import datetime
+        try:
+            out_since = datetime.fromisoformat(str(newest.get("published")).replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            out_since = t
+        for d in rows_:
+            app = d.get("app") or {}
+            if app.get("platform") != "android" or t - float(d.get("last_seen") or 0) > 2 * 86400:
+                continue
+            try:
+                have = int(str(app.get("build") or "0"))
+            except ValueError:
+                continue
+            if have and have < newest["versionCode"] and t - out_since >= 86400:
+                out.append((False, f"app: {d.get('name')!r} is on build {have}; "
+                                   f"{newest['versionCode']} has been out since "
+                                   f"{time.strftime('%d %b', time.localtime(out_since))}"))
+    return out
+
+
 def cmd_doctor(a) -> int:
     """Check agent cluster health: version skew AND whether the code can run.
 
@@ -11000,6 +11070,18 @@ def cmd_doctor(a) -> int:
                     unhealthy.append("local")
         except Exception as _exc:  # noqa: BLE001 — a line of the report, never a failed doctor
             _failures.swallowed(_exc)
+
+    # Quiet failures noted as they happened (health_log; David, 28 Nov 2026,
+    # "Build all four"): a reply picked up after a restart that never played,
+    # replays the phone never confirmed, a phone whose mic watcher is off, and
+    # a phone app behind the newest build.
+    try:
+        for bad, line in _doctor_quiet_failures():
+            print(f"{line.split(':', 1)[0]}: {'✗ ' if bad else ''}{line.split(':', 1)[1].strip()}")
+            if bad and "local" not in unhealthy:
+                unhealthy.append("local")
+    except Exception as _exc:  # noqa: BLE001 — a line of the report, never a failed doctor
+        _failures.swallowed(_exc)
 
     # This machine's env file: lines a shell cannot source as plain settings
     # (the service run scripts `.` it; systemd reads it too). 28 Nov 2026: the

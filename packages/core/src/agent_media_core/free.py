@@ -91,6 +91,10 @@ def _clean(fields: dict) -> dict:
         v = fields.get(k)
         if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
             out[k] = float(v)
+    # The phone's mic watcher (sasonica-app MicWatch), for media doctor: sent
+    # only when it is not watching, so absent means fine (28 Nov 2026).
+    if fields.get("mic_watch") is False:
+        out["mic_watch"] = False
     if out.get("quiet") and fields.get("quiet_kind") in QUIET_KINDS:
         out["quiet_kind"] = fields["quiet_kind"]
     title = fields.get("meeting_title")

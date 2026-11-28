@@ -82,6 +82,8 @@ def host(tmp_path, monkeypatch):
     monkeypatch.setattr(rs, "_resume_speech", lambda rid: speech_calls.append(("resume", rid)))
     monkeypatch.setattr(rs, "_cut_row", lambda: None)
     monkeypatch.setattr(rs, "_phone_reported", lambda: True)
+    monkeypatch.setattr(rs, "_reported_at", lambda: float("inf"))
+    monkeypatch.setattr(rs, "PICKUP_CHECK_S", 0.2)
 
     class Host:
         path = tmp_path
@@ -326,6 +328,33 @@ def test_a_hub_with_no_phone_yet_is_not_back(monkeypatch):
     monkeypatch.delenv("MEDIA_SPEECH_FRAMES_LISTEN")
     monkeypatch.setattr(cli, "_sock", lambda: "tcp://127.0.0.1:16624")
     assert rs._phone_reported() is True
+
+
+def test_a_pickup_undone_by_the_phone_is_recorded(host, monkeypatch, capsys):
+    """28 Nov 2026: the replay went out, the phone came back idle, the reply
+    was gone, and only David noticed. Now it is said and noted."""
+    from agent_media_core import health_log
+
+    _speaking(monkeypatch, left_s=45)
+    flight = iter([True, True, False])
+    monkeypatch.setattr(cli, "_speech_in_flight", lambda: next(flight, False))
+    monkeypatch.setattr(rs, "_sleep", lambda s: None)
+    monkeypatch.setattr(rs, "_cut_row", lambda: {"id": 81})
+    assert _run("--only", "canvas") == 0
+    assert "did not play after the pick-up" in capsys.readouterr().out
+    assert health_log.recent("restart_pickup", 60) [-1]["played"] is False
+
+
+def test_a_pickup_heard_playing_is_recorded_as_played(host, monkeypatch):
+    from agent_media_core import health_log
+
+    _speaking(monkeypatch, left_s=45)
+    flight = iter([True, True, False])
+    monkeypatch.setattr(cli, "_speech_in_flight", lambda: next(flight, True))
+    monkeypatch.setattr(rs, "_sleep", lambda s: None)
+    monkeypatch.setattr(rs, "_cut_row", lambda: {"id": 82})
+    assert _run("--only", "canvas") == 0
+    assert health_log.recent("restart_pickup", 60)[-1] == {**health_log.recent("restart_pickup", 60)[-1], "row": 82, "played": True}
 
 
 def test_unknown_length_is_picked_up_too(host, monkeypatch):

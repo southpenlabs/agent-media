@@ -1268,6 +1268,30 @@ def _phone_back(emit: Callable[[str], None],
         emit("speech: the phone is back")
 
 
+#: How long the pick-up has to be heard playing.
+PICKUP_CHECK_S = 30.0
+
+
+def _reported_at() -> float:
+    """When the phone last reported to the frames hub (epoch s); 0 for not
+    since it started or not yet answering; inf for a player that is not a
+    frames hub (its own word stands, as in _phone_reported)."""
+    from . import cli
+    from .sinks import _mpv_ipc as ipc
+
+    sock = cli._sock()
+    try:
+        at = ipc.get_property(sock, "user-data/agent-media/reported-at")
+    except Exception as e:  # noqa: BLE001
+        if _is_frames_hub(sock):
+            return 0.0
+        _failures.swallowed(e)
+        return float("inf")
+    if not isinstance(at, (int, float)) or isinstance(at, bool):
+        return float("inf")
+    return float(at)
+
+
 def speech_after_restart(stopped: bool, emit: Callable[[str], None]) -> None:
     """Replay the reply `speech_before_restart` stopped from its sentence,
     once a restarted frames hub has heard from the phone (`_phone_back`),
@@ -1279,11 +1303,23 @@ def speech_after_restart(stopped: bool, emit: Callable[[str], None]) -> None:
         row = _cut_row() if stopped else None
         if row is not None:
             _phone_back(emit)
+            t0 = time.time()
             _resume_speech(int(row["id"]))
             emit(f"speech: picking reply {row['id']} back up where it stopped")
-            deadline = time.time() + 15.0
-            while not speech_in_flight() and time.time() < deadline:
+            # Played means playing at a moment the phone has reported since
+            # the pick-up: a phone that came back saying idle undid it
+            # (28 Nov 2026), and that is recorded for media doctor.
+            played = False
+            deadline = t0 + PICKUP_CHECK_S
+            while time.time() < deadline:
+                if speech_in_flight() and _reported_at() > t0:
+                    played = True
+                    break
                 _sleep(0.5)
+            from . import health_log
+            health_log.note("restart_pickup", row=int(row["id"]), played=played)
+            if not played:
+                emit(f"speech: ✗ reply {row['id']} did not play after the pick-up; its Play has it")
         elif stopped:
             emit("speech: the stopped reply was not found to pick up; its Play has it")
     except Exception as e:  # noqa: BLE001 — never leave the hold on

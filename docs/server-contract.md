@@ -8335,6 +8335,13 @@ routes in `agent_media_server/app.py` `_free`. Pinned by
 `packages/server/tests/test_free_routes.py`. Proposal:
 `docs/proposals/2026-10-01-speaks-when-youre-free.md` (step 1).
 
+- `mic_watch: false` (28 Nov 2026) in a `/device/state` report says the
+  phone's mic watcher is not running (sasonica-app MicWatch); absent means
+  it is. Kept on the device's record; `media doctor` flags it, as dictation
+  then pauses neither speech nor screens. Other quiet failures `media
+  doctor` reads from `<state>/health-log.json` (core `health_log.py`): a
+  reply picked up after a restart that did not play (`restart_pickup`, with
+  `played`), and replays the phone never confirmed (`heard_unconfirmed`).
 - `POST /device/state {call?, voice?, quiet?, meeting_until?,
   meeting_title?, manual_until?}` — **a paired device only** (401 for
   anything else, the host's token included). Booleans: a phone call, a voice
