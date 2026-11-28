@@ -215,10 +215,22 @@ def test_check_ins_feed_the_doctor(rig, monkeypatch):
     assert screens.doctor_lines(now + 5, ("v1", now)) == []
     lines = screens.doctor_lines(now + screens.QUIET_S + 1, ("v1", now))
     assert lines and not lines[0][0] and "last asked" in lines[0][1]   # a line, not a fault
-    # Behind the version handed out for longer than an update takes: a fault.
+    # Still asking on the old version long after the new one came out: a fault.
     bad = screens.doctor_lines(now + 60, ("v2", now - screens.BEHIND_S))
     assert bad == [(True, bad[0][1])] and "self-update" in bad[0][1]
     assert screens.doctor_lines(now + 60, ("v2", now)) == []   # just released: give it time
+
+
+def test_a_computer_left_off_is_never_a_fault(rig):
+    """hpo is off a week at a time: a release while it is off is no fault,
+    only a quiet line."""
+    screens._SEEN.clear()
+    screens._SEEN_WRITTEN.clear()
+    t0 = 1_000_000.0
+    screens._check_in(rig["tv"], "v1", t0)            # last seen, then switched off
+    week = t0 + 7 * 86400
+    lines = screens.doctor_lines(week, ("v2", t0 + 3600))   # v2 out while it was off
+    assert lines and all(not bad for bad, _ in lines)
 
 
 def test_check_ins_are_written_at_most_once_a_minute(rig):

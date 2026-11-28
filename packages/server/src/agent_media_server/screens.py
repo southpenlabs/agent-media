@@ -189,7 +189,13 @@ def doctor_lines(now: float | None = None, latest: tuple[str, float] | None = No
             out.append((False, f"pause device {name!r}: last asked {_ago(quiet)} ago "
                                "(asleep, or its helper stopped)"))
         helper = rec.get("helper")
-        if helper and latest and helper not in ("unknown", latest[0]) and t - latest[1] >= BEHIND_S:
+        # Behind only counts while it runs: asking BEHIND_S after the new
+        # version came out and still on the old one. A computer left off for
+        # a week is not a broken update (David, 28 Nov 2026: "hpo is left off
+        # for about a week at a time").
+        asked_at = float(rec.get("at") or 0)
+        if helper and latest and helper not in ("unknown", latest[0]) \
+                and asked_at - latest[1] >= BEHIND_S:
             out.append((True, f"pause device {name!r}: helper {helper} is behind {latest[0]} "
                               f"for {_ago(t - latest[1])}: its self-update is not working "
                               "(on it: media screen update)"))
