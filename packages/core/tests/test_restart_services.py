@@ -308,6 +308,26 @@ def test_phone_reported_reads_the_hub(monkeypatch):
     assert rs._phone_reported() is True
 
 
+def test_a_hub_with_no_phone_yet_is_not_back(monkeypatch):
+    """28 Nov 2026: right after a canvas restart the hub passes the ask
+    through to the relay (or refuses it) until the phone reconnects; that
+    failure is "not yet", not "not a frames hub"."""
+    from agent_media_core.sinks import _mpv_ipc as ipc
+
+    def passed_through(sock, prop):
+        raise ipc.MpvIpcError("property unavailable")
+
+    monkeypatch.setattr(ipc, "get_property", passed_through)
+    monkeypatch.setenv("MEDIA_SPEECH_FRAMES_LISTEN", "127.0.0.1:16624")
+    monkeypatch.setattr(cli, "_sock", lambda: "tcp://127.0.0.1:16624")
+    assert rs._phone_reported() is False
+    monkeypatch.setattr(cli, "_sock", lambda: "tcp://p8a:6602")   # another player
+    assert rs._phone_reported() is True
+    monkeypatch.delenv("MEDIA_SPEECH_FRAMES_LISTEN")
+    monkeypatch.setattr(cli, "_sock", lambda: "tcp://127.0.0.1:16624")
+    assert rs._phone_reported() is True
+
+
 def test_unknown_length_is_picked_up_too(host, monkeypatch):
     _speaking(monkeypatch)
     monkeypatch.setattr(rs, "_sleep", lambda s: None)

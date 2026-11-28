@@ -1209,16 +1209,32 @@ def speech_before_restart(emit: Callable[[str], None]) -> bool:
 PHONE_BACK_S = 45.0
 
 
+def _is_frames_hub(sock: object) -> bool:
+    """Is `sock` this host's speech frames hub (MEDIA_SPEECH_FRAMES_LISTEN)?"""
+    listen = os.environ.get("MEDIA_SPEECH_FRAMES_LISTEN", "").strip()
+    return bool(listen) and str(sock or "").removeprefix("tcp://") == listen
+
+
 def _phone_reported() -> bool:
     """Has the frames hub heard from the phone since the hub started? Its
     REPORTED_AT (speech_frames) is 0 until the first report; a player that
-    is not a frames hub has no such property and counts as reported."""
+    is not a frames hub has no such property and counts as reported.
+
+    A frames hub with no phone connected yet does not answer for itself: it
+    passes the connection through to the relay, or refuses it
+    (speech_frames `serve`), so the ask fails. That is "not yet", not "not
+    a hub": read as the latter, the pick-up after a canvas restart went out
+    at once, 5 s before the phone came back, and its idle report dropped
+    the reply (David, 28 Nov 2026: "that last message stopped midstream")."""
     from . import cli
     from .sinks import _mpv_ipc as ipc
 
+    sock = cli._sock()
     try:
-        at = ipc.get_property(cli._sock(), "user-data/agent-media/reported-at")
+        at = ipc.get_property(sock, "user-data/agent-media/reported-at")
     except Exception as e:  # noqa: BLE001 — not a frames hub: nothing to wait for
+        if _is_frames_hub(sock):
+            return False
         _failures.swallowed(e)
         return True
     if not isinstance(at, (int, float)) or isinstance(at, bool):
