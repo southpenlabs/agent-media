@@ -1,0 +1,4 @@
+# Only a host that runs releases (docs/reference/releases.md) has anything
+# for it to do; a checkout is updated with git. The installer's binary has
+# its own timer (sasonica-update, from `sasonica install`).
+requires-env: MEDIA_RELEASE_REMOTE

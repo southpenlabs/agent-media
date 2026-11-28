@@ -131,12 +131,19 @@ def deploy_log() -> Path:
     return state_dir() / "deploys.jsonl"
 
 
+#: Set while `auto_update` runs: its deploy-log lines say `auto`, so the next
+#: tick can tell its own updates from one made by hand (self_update).
+_AUTO = False
+
+
 def log(event: str, **fields) -> dict:
     """Append one line to the deploy log; the record."""
     now = time.time()
     rec = {"t": round(now, 3),
            "at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
            "event": event, **fields}
+    if _AUTO:
+        rec["auto"] = True
     path = deploy_log()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1524,6 +1531,78 @@ def update(to: str = "", *, remote: str = "", only: "Optional[list[str]]" = None
         emit("nothing restarted" + ("" if units else ": no running unit loads what changed"))
         return 0
     return _go(units, sha, old, emit, detach=detach)
+
+
+def auto_update(*, emit: Emit = print, now: "Optional[float]" = None) -> int:
+    """`media update --auto`, the self-update timer's job (self_update.py):
+    ask the channel what is newest and write it down; with
+    MEDIA_SELF_UPDATE=on (a release host's default is `check`), take it by
+    `update()` at a quiet moment. agent-mail's checkout is fetched, and
+    fast-forwarded under `on`, on the same tick. Exit 0 whatever it finds
+    (the doctor reads the state file); 1 only for an update that failed."""
+    global _AUTO
+    from . import self_update as su
+
+    m = su.mode("release")
+    prev = su.read_state()
+    t = time.time() if now is None else now
+    if m == "off":
+        su.record(kind="release", mode_=m, result="off", now=t)
+        emit("self-update is off (MEDIA_SELF_UPDATE=off)")
+        return 0
+    cur = current()
+    if not cur:
+        su.record(kind="release", mode_=m, result="no-release", now=t)
+        emit("no release in use here (a checkout updates with git): nothing to do")
+        return 0
+    have = str(cur["sha"])
+    cfg = config()
+    try:
+        fetch(cfg.remote)
+        latest = resolve_ref(cfg.branch)
+    except ReleaseError as e:
+        su.record(kind="release", mode_=m, have=have, reached=False, error=str(e)[:300],
+                  result="offline", now=t)
+        emit(f"could not reach the release channel: {e}")
+        return 0
+    why = su.not_quiet(kind="release", now=t)
+    mail = su.mail_record(prev, su.agent_mail_step(pull=m == "on" and not why), t)
+    if mail:
+        emit(f"agent-mail: {mail['behind']} behind" if mail.get("behind") else
+             f"agent-mail: pulled {mail['pulled']} commit(s)" if mail.get("pulled") else
+             "agent-mail: up to date")
+        if mail.get("error"):
+            emit(f"agent-mail: {mail['error']}")
+    if latest == have:
+        su.record(kind="release", mode_=m, have=have, latest=latest, result="up-to-date",
+                  now=t, agent_mail=mail)
+        emit(f"up to date ({have[:12]}, {cfg.branch})")
+        return 0
+    if m == "check":
+        su.record(kind="release", mode_=m, have=have, latest=latest, result="behind",
+                  now=t, agent_mail=mail)
+        emit(f"{latest[:12]} is out ({cfg.branch}); this host updates by hand "
+             "(MEDIA_SELF_UPDATE=check): media update")
+        return 0
+    if why:
+        su.record(kind="release", mode_=m, have=have, latest=latest, result="busy", why=why,
+                  now=t, agent_mail=mail)
+        emit(f"{latest[:12]} is out, but not now: " + "; ".join(why))
+        return 0
+    emit(f"{latest[:12]} is out and the host is quiet: updating")
+    _AUTO = True
+    try:
+        rc = update(emit=emit)
+    finally:
+        _AUTO = False
+    now_on = current()
+    on = str(now_on["sha"]) if now_on else have
+    result = ("updated" if rc == 0 else "busy" if rc == 3
+              else "rolled-back" if on == have else "failed")
+    su.record(kind="release", mode_=m, have=on, latest=on if rc == 0 else latest, result=result,
+              error="" if rc in (0, 3) else f"media update exited {rc}", now=time.time(),
+              agent_mail=mail)
+    return 1 if result in ("failed", "rolled-back") else 0
 
 
 def rollback(*, restart: bool = True, dry_run: bool = False, emit: Emit = print) -> int:

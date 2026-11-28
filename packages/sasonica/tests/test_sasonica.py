@@ -187,3 +187,86 @@ def test_the_tunnel_unit_runs_sasonica_tunnel():
     # `sasonica pair`, the command the app's pairing screen names.
     assert sas.ALIASES["pair"] == ("media-visual-canvas", ["pair"])
     assert install.LABELS[name] == "com.sasonica.quick-tunnel"
+
+
+# --- the self-update (sasonica update --auto) ----------------------------------
+
+
+def _auto(tmp_path, monkeypatch, *, why=(), mode=None):
+    """An install one release behind, its state in tmp_path."""
+    from agent_media_core import self_update as su
+
+    rel = _release(tmp_path, b"#!/bin/sh\necho 'sasonica 2'\n")
+    binary = tmp_path / "sasonica"
+    binary.write_bytes(b"#!/bin/sh\necho 'sasonica 1'\n")
+    binary.chmod(0o755)
+    monkeypatch.setenv("SASONICA_BINARY_BASE", rel.as_uri())
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    if mode:
+        monkeypatch.setenv("MEDIA_SELF_UPDATE", mode)
+    else:
+        monkeypatch.delenv("MEDIA_SELF_UPDATE", raising=False)
+    monkeypatch.setattr(su, "not_quiet", lambda **kw: list(why))
+    monkeypatch.setattr(su, "agent_mail_step", lambda pull, repo=None: None)
+    return binary, su
+
+
+def test_auto_waits_for_a_quiet_moment(tmp_path, monkeypatch):
+    binary, su = _auto(tmp_path, monkeypatch, why=["a reply is being read"])
+    before = binary.read_bytes()
+    assert update.main(["--binary", str(binary), "--auto"]) == 0
+    assert binary.read_bytes() == before
+    st = su.read_state()
+    assert st["result"] == "busy" and st["kind"] == "binary" and st["mode"] == "on"
+
+
+def test_auto_check_only_looks(tmp_path, monkeypatch):
+    binary, su = _auto(tmp_path, monkeypatch, mode="check")
+    before = binary.read_bytes()
+    assert update.main(["--binary", str(binary), "--auto"]) == 0
+    assert binary.read_bytes() == before and su.read_state()["result"] == "behind"
+
+
+def test_auto_updates_and_keeps_the_old_binary(tmp_path, monkeypatch):
+    binary, su = _auto(tmp_path, monkeypatch)
+    old = binary.read_bytes()
+    monkeypatch.setattr(update, "_systemd", lambda: False)
+    assert update.main(["--binary", str(binary), "--auto"]) == 0
+    assert b"sasonica 2" in binary.read_bytes()
+    assert (tmp_path / "sasonica.prev").read_bytes() == old
+    st = su.read_state()
+    assert st["result"] == "updated" and st["have"] == st["latest"]
+
+
+def test_a_server_that_does_not_come_back_steps_back(tmp_path, monkeypatch):
+    binary, su = _auto(tmp_path, monkeypatch)
+    old = binary.read_bytes()
+    ran = []
+    monkeypatch.setattr(update, "_systemd", lambda: True)
+    monkeypatch.setattr(update, "_restart_systemd", lambda force: False)
+    monkeypatch.setattr(update, "healthy", lambda within=0, systemd=True: False)
+    monkeypatch.setattr(update, "_alert", lambda *a, **k: ran.append(("alert", a)))
+    monkeypatch.setattr(update.subprocess, "run",
+                        lambda argv, **kw: ran.append(argv) or
+                        argparse.Namespace(returncode=0, stdout="sasonica 2\n"))
+    assert update.main(["--binary", str(binary), "--auto"]) == 1
+    assert binary.read_bytes() == old
+    assert su.read_state()["result"] == "rolled-back"
+    assert any(r[0] == "alert" and r[1][0] == "warn" for r in ran if isinstance(r, tuple))
+
+
+def test_auto_offline_is_written_down_not_failed(tmp_path, monkeypatch):
+    binary, su = _auto(tmp_path, monkeypatch)
+    monkeypatch.setenv("SASONICA_BINARY_BASE", (tmp_path / "nowhere").as_uri())
+    assert update.main(["--binary", str(binary), "--auto"]) == 0
+    assert su.read_state()["result"] == "offline"
+
+
+def test_install_writes_the_self_update_timer():
+    text = install.update_unit_text("/opt/sasonica")
+    assert 'ExecStart="/opt/sasonica" update --auto' in text and "Type=oneshot" in text
+    assert "OnCalendar=hourly" in install.update_timer_text()
+    import plistlib
+    p = plistlib.loads(install.update_plist_text("/opt/sasonica").encode())
+    assert p["ProgramArguments"] == ["/opt/sasonica", "update", "--auto"]
+    assert p["StartInterval"] == 3600

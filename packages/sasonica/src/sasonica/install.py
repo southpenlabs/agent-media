@@ -46,6 +46,13 @@ has the binary instead of a checkout:
      kept), or launchd daemons running as you (/Library/LaunchDaemons) —
      which asks for an administrator; `--signed-out off` goes back. Every
      platform is reminded that sleep stops them all the same;
+     and the self-update: on Linux the timer sasonica-update (hourly, a
+     random delay, caught up after the computer was off) running `sasonica
+     update --auto`, on a Mac the agent com.sasonica.update every hour. It
+     takes a new release only at a quiet moment, keeps the old binary to
+     step back to, and is set with MEDIA_SELF_UPDATE (on, check, off) in
+     ~/.config/agent-media.env (agent_media_core/self_update.py). Not on
+     Windows yet: there `sasonica update` is run by hand;
   6. with --local-speech, on Windows: a speech player on this computer, the
      logon task Sasonica\\speech running your own mpv (`sasonica
      media-sink-speech`) on the speech pipe, restarted when it fails. Speech
@@ -163,6 +170,68 @@ RestartSec=2
 [Install]
 WantedBy=default.target
 """
+
+
+#: The self-update: a oneshot and its timer (Linux), an hourly agent (a Mac).
+UPDATE_UNIT = "sasonica-update"
+UPDATE_LABEL = "com.sasonica.update"
+
+
+def update_unit_text(binary: str) -> str:
+    return f"""[Unit]
+Description=Sasonica self-update: a new release at a quiet moment
+After=network-online.target
+
+[Service]
+# Written by `sasonica install`. MEDIA_SELF_UPDATE (on, check, off) in the
+# env file says what it may do; its log is this unit's journal.
+Type=oneshot
+Environment=PATH=%h/.local/bin:%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-%h/.config/agent-media.env
+ExecStart="{binary}" update --auto
+"""
+
+
+def update_timer_text() -> str:
+    return """[Unit]
+Description=Sasonica self-update, hourly
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+
+
+def update_plist_text(binary: str) -> str:
+    """The self-update on a Mac: `sasonica update --auto` every hour."""
+    import plistlib
+
+    home = Path.home()
+    logs = home / "Library" / "Logs" / "sasonica"
+    path = ":".join([str(home / ".local" / "bin"), "/opt/homebrew/bin", "/usr/local/bin",
+                     "/usr/bin", "/bin"])
+    return plistlib.dumps({
+        "Label": UPDATE_LABEL, "ProgramArguments": [binary, "update", "--auto"],
+        "StartInterval": 3600, "RunAtLoad": False,
+        "EnvironmentVariables": {"PATH": path}, "WorkingDirectory": str(home),
+        "StandardOutPath": str(logs / f"{UPDATE_LABEL}.log"),
+        "StandardErrorPath": str(logs / f"{UPDATE_LABEL}.log"),
+    }).decode()
+
+
+def _update_step_launchd(binary: str, a) -> int:
+    plist = launch_agents() / f"{UPDATE_LABEL}.plist"
+    print(f"  {plist} (self-update, hourly)")
+    if not a.dry_run:
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        plist.write_text(update_plist_text(binary))
+        subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{UPDATE_LABEL}"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return _run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)], dry_run=a.dry_run)
 
 
 #: launchd's label for each service (a Mac).
@@ -809,6 +878,7 @@ def main(argv: list[str] | None = None) -> int:
     print("== Services")
     if sys.platform == "darwin":
         rc = _launchd(binary, a)
+        _update_step_launchd(binary, a)
         print(SLEEP_NOTE["darwin"])
         return rc
     if os.name == "nt":
@@ -838,6 +908,12 @@ def main(argv: list[str] | None = None) -> int:
               dry_run=a.dry_run)
     # Restart too: after a new binary, enable --now leaves the old one running.
     _run(["systemctl", "--user", "restart", *(f"{n}.service" for n in a.units)], dry_run=a.dry_run)
+    print(f"  {units / (UPDATE_UNIT + '.timer')} (self-update, hourly)")
+    if not a.dry_run:
+        (units / f"{UPDATE_UNIT}.service").write_text(update_unit_text(binary))
+        (units / f"{UPDATE_UNIT}.timer").write_text(update_timer_text())
+    _run(["systemctl", "--user", "daemon-reload"], dry_run=a.dry_run)
+    _run(["systemctl", "--user", "enable", "--now", f"{UPDATE_UNIT}.timer"], dry_run=a.dry_run)
     _linger_step(a)
     print(SLEEP_NOTE["linux"])
     return rc

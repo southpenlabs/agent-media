@@ -9745,6 +9745,8 @@ def cmd_update(a) -> int:
         emit = lambda line: print(line, flush=True)  # noqa: E731
         if a.rollback:
             return release.rollback(restart=not a.no_restart, dry_run=a.dry_run, emit=emit)
+        if a.auto:
+            return release.auto_update(emit=emit)
         return release.update(a.to or "", remote=a.remote or "", only=a.only or None,
                               restart=not a.no_restart, every=a.all,
                               dry_run=a.dry_run, detach=a.detach, emit=emit)
@@ -11089,6 +11091,19 @@ def cmd_doctor(a) -> int:
         except Exception as _exc:  # noqa: BLE001 — a line of the report, never a failed doctor
             _failures.swallowed(_exc)
 
+    # This server against its release channel, and agent-mail against its
+    # own (self_update; agent-mail #1447, David, 28 Nov 2026): a timer that
+    # stopped, a host behind and not catching up, told apart from one that
+    # was off or offline.
+    try:
+        from . import self_update as _self_update
+        for bad, line in _self_update.doctor_lines():
+            print(f"update: {'✗ ' if bad else ''}{line}")
+            if bad and "local" not in unhealthy:
+                unhealthy.append("local")
+    except Exception as _exc:  # noqa: BLE001 — a line of the report, never a failed doctor
+        _failures.swallowed(_exc)
+
     # Quiet failures noted as they happened (health_log; David, 28 Nov 2026,
     # "Build all four"): a reply picked up after a restart that never played,
     # replays the phone never confirmed, a phone whose mic watcher is off, and
@@ -12133,6 +12148,12 @@ def _build_parser() -> argparse.ArgumentParser:
     up.add_argument("--rollback", action="store_true",
                     help="point `current` back at the previous release and "
                          "restart what differs")
+    up.add_argument("--auto", action="store_true",
+                    help="the self-update timer's run: check the channel, write "
+                         "down how far behind, and with MEDIA_SELF_UPDATE=on (a "
+                         "release host's default is check) update at a quiet "
+                         "moment; agent-mail's checkout is kept current too "
+                         "(agent_media_core/self_update.py)")
     up.add_argument("--remote", metavar="URL", default=None,
                     help="the git remote to fetch releases from; needed once "
                          "when MEDIA_RELEASE_REMOTE is unset, kept after")

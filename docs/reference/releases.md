@@ -129,6 +129,39 @@ at the same file under `current`.
 **`media-setup install-services`** run from a release writes units that
 name `current`, so they follow the next update.
 
+## Self-update
+
+`media update --auto` is the timer job `agent-media-self-update` (hourly, a
+random 20 min delay, caught up after the host was off; installed by
+`media-setup install-services` where `MEDIA_RELEASE_REMOTE` is set). Each
+tick fetches the channel, writes down what this host runs and what the
+channel has (`<state>/agent-media/self-update.json`, read by `media
+doctor`'s `update:` lines), and does what `MEDIA_SELF_UPDATE` allows:
+
+| value | does |
+|---|---|
+| `check` (a release host's default) | looks and writes down; never switches. The sessions on such a host (red2) deploy by hand, and the code does not move under them unasked |
+| `on` | takes the new release by `media update` (build, switch, restart, health check, step back), only at a quiet moment: no chat mid-turn (a chat showing only a question card does not count), no reply being read or waiting, no restart pending, and no update by hand in the last 30 min. Busy, it waits for the next tick |
+| `off` | nothing |
+
+Its deploy-log lines say `"auto": true`, which is how the next tick tells
+its own updates from one made by hand.
+
+The installer's binary has the same thing as `sasonica update --auto`, the
+timer `sasonica-update` (a Mac: the agent `com.sasonica.update`) written by
+`sasonica install`, `on` by default there: nobody else updates that host. It
+keeps the binary it replaces as `sasonica.prev`, waits up to 45 s for the
+server to answer `/healthz` after the restart, and puts the old one back
+(alert `release.<host>`) when it does not. A session holder left on the old
+version for its live chats is restarted by a later tick once none is live.
+Not on Windows yet.
+
+agent-mail is not a dependency (every use is guarded), so the installer does
+not install it; where a host has an agent-mail checkout (the one `agent-mail`
+on PATH lives in, else `~/projects/agent-mail`), each tick fetches it and,
+under `on`, fast-forwards it when it is clean. Never a merge, rebase or
+stash. Code: `packages/core/src/agent_media_core/self_update.py`.
+
 ## Moving a host from a checkout to releases
 
 ```sh

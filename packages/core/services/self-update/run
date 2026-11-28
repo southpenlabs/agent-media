@@ -1,0 +1,15 @@
+#!/bin/sh
+# self-update — this host's release against its channel, about once an hour
+# (`media update --auto`, agent_media_core/self_update.py). It writes down
+# how far behind the host is (media doctor reads it) and, with
+# MEDIA_SELF_UPDATE=on, takes the new release at a quiet moment by the same
+# path as `media update`. A release host's default is `check`: its sessions
+# deploy by hand, and the code does not move under them unasked.
+# agent-mail's checkout is kept current on the same tick.
+exec 2>&1
+[ -f "$HOME/.config/agent-media.env" ] && . "$HOME/.config/agent-media.env"
+media update --auto
+rc=$?
+# runit has no timers: there, the hour's wait is the service's own.
+[ -n "$INVOCATION_ID" ] && exit $rc
+exec sleep 3600
