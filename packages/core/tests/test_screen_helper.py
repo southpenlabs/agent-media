@@ -238,3 +238,40 @@ def test_run_checks_for_updates_and_hands_over(monkeypatch):
     assert sh.run({"url": "u", "token": "t"}, backend=FakeBackend([]), sleep=sleep,
                   mic=lambda: [], clock=lambda: t["now"]) == 0
     assert handed == [1] and t["now"] >= sh.UPDATE_FIRST_S
+
+
+def test_the_loop_keeps_pausing_while_an_update_installs(monkeypatch):
+    """28 Nov 2026: a 70 s install inside the loop left a reply unpaused."""
+    import threading
+
+    t = {"now": 0.0}
+    gate = threading.Event()
+    monkeypatch.setattr(sh, "may_update", lambda: True)
+    answers = iter([False, False, True, True, False, False, False])
+    monkeypatch.setattr(sh, "ask", lambda rec: {"on": True, "pause": next(answers, False)})
+
+    def slow_update(rec):
+        gate.wait(5)
+        return True
+
+    monkeypatch.setattr(sh, "check_update", slow_update)
+    handed = []
+    monkeypatch.setattr(sh, "_start_again", lambda: handed.append(t["now"]))
+    b = FakeBackend(["chrome.exe"])
+    turns = {"n": 0}
+
+    def sleep(s):
+        t["now"] += 30
+        turns["n"] += 1
+        if turns["n"] == 4:
+            assert b.paused == ["chrome.exe"]   # paused while the install runs
+            gate.set()
+        if turns["n"] > 4:
+            import time as _t
+            _t.sleep(0.05)
+        if turns["n"] > 50:
+            raise KeyboardInterrupt
+
+    assert sh.run({"url": "u", "token": "t"}, backend=b, sleep=sleep, mic=lambda: [],
+                  clock=lambda: t["now"]) == 0
+    assert handed and b.resumed == ["chrome.exe"]   # handed over only once resumed

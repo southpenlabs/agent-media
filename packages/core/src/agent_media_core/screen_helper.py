@@ -33,6 +33,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -397,16 +398,34 @@ def run(rec: dict, backend=None, sleep: Callable[[float], None] = time.sleep,
     log.info("screen ducker started (%s, %s backend, version %s)", rec["url"],
              backend.name, installed_version() or "unknown")
     next_update = (clock() + UPDATE_FIRST_S) if (updates and may_update()) else None
+    # The update runs beside the loop, never in it: installing took 70 s on
+    # hpo, and a reply that began meanwhile went unpaused until halfway
+    # through (David, 28 Nov 2026: "It didn't pause for this reply until
+    # about halfway through"). Its result is a box the loop reads.
+    upd: dict = {}
+    updater: Optional[threading.Thread] = None
+
+    def _update() -> None:
+        try:
+            upd["done"] = check_update(rec)
+        except Exception as e:  # noqa: BLE001 - an update never ends the loop
+            log.warning("update failed: %s", e)
+            upd["done"] = False
+
     while True:
-        if next_update is not None and clock() >= next_update and not d.holding:
+        if next_update is not None and updater is None and clock() >= next_update:
             next_update = clock() + UPDATE_EVERY_S
-            try:
-                if check_update(rec):
-                    d.release()
-                    _start_again()
-                    return 0
-            except (ScreenError, OSError, ValueError, subprocess.SubprocessError) as e:
-                log.warning("update failed: %s", e)
+            upd.clear()
+            updater = threading.Thread(target=_update, name="screen-update", daemon=True)
+            updater.start()
+        if updater is not None and "done" in upd:
+            updater = None
+            if upd["done"]:
+                upd["ready"] = True
+        # The new code takes over only while nothing is paused.
+        if upd.get("ready") and not d.holding:
+            _start_again()
+            return 0
         server: Optional[bool]
         try:
             got = ask(rec)
@@ -575,7 +594,7 @@ def cmd(a) -> int:
     # Under pythonw (the Windows logon task) there is no stderr: log to a file.
     stream = sys.stderr if sys.stderr is not None else open(  # noqa: SIM115
         conf_path().with_name("screen.log"), "a", buffering=1, encoding="utf-8")
-    logs.setup(stream=stream)
+    logs.setup(stream=stream, fmt="%(asctime)s " + logs.DEFAULT_FORMAT)
     return run(conf, once=a.once)
 
 
