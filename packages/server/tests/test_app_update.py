@@ -79,7 +79,7 @@ def gh(monkeypatch):
                  "sasonica-bridges-11-fedcba9.apk": BRIDGES_APK})
 
     def releases(name):
-        if name == "davidj4tech/sasonica-bridges":
+        if name == "git.southpenlabs.com/sasonica/sasonica-bridges":
             seen["bridges_lists"] += 1
             return BRIDGES_RELEASES
         assert name == "southpenlabs/sasonica-app"
@@ -289,7 +289,7 @@ def test_the_bridges_listing(server, signed_in, gh):
 def test_the_bridges_repo_is_set_by_its_own_variable(monkeypatch):
     monkeypatch.delenv("MEDIA_BRIDGES_UPDATE_REPO", raising=False)
     monkeypatch.setenv("MEDIA_APP_UPDATE_REPO", "someone/else")
-    assert app_update.repo("bridges") == "davidj4tech/sasonica-bridges"
+    assert app_update.repo("bridges") == "git.southpenlabs.com/sasonica/sasonica-bridges"
     monkeypatch.setenv("MEDIA_BRIDGES_UPDATE_REPO", "org/bridges")
     assert app_update.repo("bridges") == "org/bridges"
     assert app_update.repo() == "someone/else"
@@ -506,3 +506,34 @@ def test_built_at_from_the_notes():
     assert f("built: 2026-11-18T14:32:00+11:00") == "2026-11-18T14:32:00+11:00"
     assert f("versionCode: 1\n") is None and f("") is None and f(None) is None
     assert f("built: yesterday\n") is None and f("rebuilt: 2026-11-18T03:32:00Z") is None
+
+
+def test_a_host_owner_name_repo_is_read_from_forgejo(monkeypatch, tmp_path):
+    """A bridges repo on Forgejo (28 Nov 2026): the list and the asset come
+    from that host's API, not gh."""
+    import io
+    import json
+
+    asked = []
+    rel = {"tag_name": "build-1001", "body": "commit: " + "a" * 40, "assets": [
+        {"name": "sasonica-bridges-1001-aaaaaaa.apk", "size": 3,
+         "browser_download_url": "https://git.example.org/attachments/x1"}]}
+
+    def get(host, path, timeout):
+        asked.append((host, path))
+        if path.endswith("releases?limit=30"):
+            return io.BytesIO(json.dumps([rel]).encode())
+        if "/releases/tags/" in path:
+            return io.BytesIO(json.dumps(rel).encode())
+        return io.BytesIO(b"apk")
+
+    monkeypatch.setattr(app_update, "_forgejo_get", get)
+    name = "git.example.org/sasonica/sasonica-bridges"
+    assert app_update._gh_releases(name) == [rel]
+    dest = tmp_path / "x.apk"
+    app_update._gh_download(name, "build-1001", rel["assets"][0]["name"], dest)
+    assert dest.read_bytes() == b"apk"
+    assert asked == [
+        ("git.example.org", "/api/v1/repos/sasonica/sasonica-bridges/releases?limit=30"),
+        ("git.example.org", "/api/v1/repos/sasonica/sasonica-bridges/releases/tags/build-1001"),
+        ("git.example.org", "/attachments/x1")]

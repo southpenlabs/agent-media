@@ -34,7 +34,9 @@ The Sasonica Bridges companion app (org.sasonica.bridges,
 docs/proposals/2026-11-04-bridges-on-the-phone.md) is offered the same way
 with `app=bridges` (absent: `sasonica`, everything above): no flavor (one
 given is 400), the repo MEDIA_BRIDGES_UPDATE_REPO (default
-davidj4tech/sasonica-bridges), `build-<N>` releases carrying
+git.southpenlabs.com/sasonica/sasonica-bridges, on Forgejo since 28 Nov
+2026, read with that host's MEDIA_FORGE_TOKENS token; an owner/name repo
+is still GitHub's, through gh), `build-<N>` releases carrying
 `sasonica-bridges-<N>-<sha7>.apk`, its own list cache and its own download
 dir (state_dir()/app-update/bridges, keeping its own last two). Unlike
 Sasonica's, it is for paired devices only, admins and members: 401 without
@@ -60,15 +62,22 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
+from typing import Any
 
 from . import auth
 
 DEFAULT_REPO = "southpenlabs/sasonica-app"
-DEFAULT_BRIDGES_REPO = "davidj4tech/sasonica-bridges"
+#: On Forgejo since 28 Nov 2026 (David: "let's ditch GitHub and go with
+#: forgejo"): a repo given as host/owner/name is read from that host's
+#: Forgejo API with its MEDIA_FORGE_TOKENS token (forge.token), not with gh.
+DEFAULT_BRIDGES_REPO = "git.southpenlabs.com/sasonica/sasonica-bridges"
 FLAVORS = ("personal", "release")
 APPS = ("sasonica", "bridges")
 #: The bridges app has no flavors; its one APK is kept under this key.
@@ -78,7 +87,7 @@ WEB_TYPE = "application/gzip"
 #: The web bundles' download dir, under cache_dir().
 WEB = "web"
 
-_REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
+_REPO = re.compile(r"(?:[A-Za-z0-9.-]{1,253}/)?[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 _TAG = re.compile(r"build-([0-9]{1,9})")
 _BUILD = re.compile(r"[0-9]{1,9}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -117,7 +126,7 @@ def repo(app: str = "sasonica") -> str:
                     else ("MEDIA_APP_UPDATE_REPO", DEFAULT_REPO))
     r = (os.environ.get(var) or "").strip() or default
     if not _REPO.fullmatch(r) or ".." in r:
-        raise Unavailable(f"{var} must be owner/name")
+        raise Unavailable(f"{var} must be owner/name or host/owner/name")
     return r
 
 
@@ -137,8 +146,59 @@ def cache_dir(app: str = "sasonica") -> Path:
 
 # --- gh (the only way out; tests replace these two) ---------------------------
 
+def _on_forgejo(name: str) -> tuple[str, str] | None:
+    """(host, owner/name) for a host/owner/name repo, else None (GitHub)."""
+    parts = name.split("/")
+    return (parts[0], f"{parts[1]}/{parts[2]}") if len(parts) == 3 else None
+
+
+def _forgejo_get(host: str, path: str, timeout: float) -> Any:
+    """A response from the host's Forgejo, with its token if it has one."""
+    from . import forge
+
+    # Cloudflare in front of the forge refuses urllib's own user agent (403).
+    req = urllib.request.Request(f"https://{host}{path}",
+                                 headers={"User-Agent": "agent-media app-update"})
+    tok = forge.token(host)
+    if tok:
+        req.add_header("Authorization", f"token {tok}")
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)  # noqa: S310 (https only)
+    except (OSError, ValueError) as e:
+        raise Unavailable(f"{host}: {e}") from e
+
+
+def _forgejo_releases(host: str, name: str) -> list:
+    with _forgejo_get(host, f"/api/v1/repos/{name}/releases?limit=30", 30) as r:
+        try:
+            data = json.loads(r.read())
+        except ValueError as e:
+            raise Unavailable(f"{host}: not JSON") from e
+    if not isinstance(data, list):
+        raise Unavailable(f"{host}: not a list of releases")
+    return data
+
+
+def _forgejo_download(host: str, name: str, tag: str, asset: str, dest: Path) -> None:
+    with _forgejo_get(host, f"/api/v1/repos/{name}/releases/tags/{urllib.parse.quote(tag)}", 30) as r:
+        try:
+            rel = json.loads(r.read())
+        except ValueError as e:
+            raise Unavailable(f"{host}: not JSON") from e
+    url = next((str(a.get("browser_download_url") or "") for a in rel.get("assets") or []
+                if isinstance(a, dict) and a.get("name") == asset), "")
+    prefix = f"https://{host}/"
+    if not url.startswith(prefix):
+        raise Unavailable(f"{host}: {tag} has no {asset}")
+    with _forgejo_get(host, "/" + url[len(prefix):], 600) as r, open(dest, "wb") as f:
+        shutil.copyfileobj(r, f)
+
+
 def _gh_releases(name: str) -> list:
-    """The repo's newest releases, as GitHub's REST API gives them."""
+    """The repo's newest releases, as GitHub's REST API gives them (Forgejo's
+    has the same shape, for a host/owner/name repo)."""
+    if fj := _on_forgejo(name):
+        return _forgejo_releases(*fj)
     try:
         out = subprocess.run(
             ["gh", "api", f"repos/{name}/releases?per_page=30"],
@@ -158,6 +218,8 @@ def _gh_releases(name: str) -> list:
 
 def _gh_download(name: str, tag: str, asset: str, dest: Path) -> None:
     """One asset of one release into `dest`."""
+    if fj := _on_forgejo(name):
+        return _forgejo_download(*fj, tag, asset, dest)
     try:
         out = subprocess.run(
             ["gh", "release", "download", tag, "-R", name, "-p", asset,
