@@ -431,3 +431,80 @@ def post(body, bearer: str) -> tuple[bool, dict]:
         except Exception as _exc:  # noqa: BLE001 — the list is saved; the next post prunes
             _failures.swallowed(_exc)
     return True, {"chats": _answer(list(clean))}
+
+
+# --- Members: the people a Local chat is with ---------------------------------
+#
+# David, 28 Nov 2026: his work staff list (phs-people) learned colleagues from
+# the Teams bridge on red2; Teams moved to the phone's companion, so the app
+# asks the companion for each Teams chat's members (AIDL v10 getMembers) and
+# sends their names here: "Have the app send group members too". Names only,
+# never what anyone said; kept on the chat's record as `members`, and only
+# where names are kept (`names_on`): a hosted server takes none.
+
+MEMBER_NETWORKS = frozenset({"teams"})
+MAX_MEMBER_CHATS = 500
+MAX_MEMBERS = 500
+
+
+def post_members(body, bearer: str) -> tuple[bool, dict]:
+    """`POST /local/members {"network", "chats": [{"id", "members": [{"name",
+    "id"?}]}]}` from the device that bridges the chats. Each chat's list
+    replaces its last; a chat this server has no record of, or another
+    device bridges, is skipped. Answers `{"stored": n, "skipped": n,
+    "names": bool}`."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    if auth.is_guest(bearer):
+        return False, {"code": "guest", "status": 403, "error": "a guest sends no Local chats"}
+    device = auth.device_id(bearer)
+    if not device:
+        return False, {"error": "only a paired device bridges chats", "status": 403}
+    if not isinstance(body, dict) or set(body) - {"network", "chats"}:
+        return _bad("the body is {network, chats}", code="field_not_accepted")
+    network = body.get("network")
+    if network not in MEMBER_NETWORKS:
+        return _bad(f"members are taken for {', '.join(sorted(MEMBER_NETWORKS))} only",
+                    code="unknown_network")
+    chats = body.get("chats")
+    if not isinstance(chats, list) or len(chats) > MAX_MEMBER_CHATS:
+        return _bad(f"chats is a list of at most {MAX_MEMBER_CHATS}")
+    clean: dict[str, list] = {}
+    for i, c in enumerate(chats):
+        if not isinstance(c, dict) or set(c) - {"id", "members"}:
+            return _bad(f"chats[{i}] is {{id, members}}", code="field_not_accepted")
+        nid, ms = c.get("id"), c.get("members")
+        if not isinstance(nid, str) or not NET_ID.fullmatch(nid):
+            return _bad(f"chats[{i}].id is the network's chat id")
+        if not isinstance(ms, list) or len(ms) > MAX_MEMBERS:
+            return _bad(f"chats[{i}].members is a list of at most {MAX_MEMBERS}")
+        out = []
+        for m in ms:
+            if not isinstance(m, dict) or set(m) - {"name", "id"} or not isinstance(m.get("name"), str):
+                return _bad(f"chats[{i}].members holds {{name, id?}}", code="field_not_accepted")
+            mid = m.get("id")
+            if mid is not None and (not isinstance(mid, str) or not ACCOUNT_ID.fullmatch(mid)):
+                return _bad(f"chats[{i}].members[].id is the network's id for the person")
+            name = _clean_name(m["name"])
+            if name:
+                out.append({"name": name, **({"id": mid} if mid else {})})
+        clean[f"local:{network}:{nid}"] = out
+    if not names_on():
+        return True, {"stored": 0, "skipped": len(clean), "names": False}
+    stored = skipped = 0
+
+    def fn(rows: dict) -> bool:
+        nonlocal stored, skipped
+        for sid, ms in clean.items():
+            rec = rows.get(sid)
+            if not isinstance(rec, dict) or rec.get("device") != device:
+                skipped += 1
+                continue
+            rec["members"] = ms
+            rec["members_at"] = round(time.time(), 3)
+            stored += 1
+        return stored > 0
+
+    STORE.update(fn)
+    return True, {"stored": stored, "skipped": skipped, "names": True}

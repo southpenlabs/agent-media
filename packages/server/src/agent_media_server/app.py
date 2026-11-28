@@ -521,7 +521,7 @@ CORS_PATHS = frozenset({
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/music/next", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/services", "/settings/people", "/settings/mail", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/usage/plans", "/usage/credits", "/rename", "/session/quiet", "/session/mute", "/session/remind", "/session/issue",
-    "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
+    "/local/chats", "/local/members", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
     "/local/avatar", "/local/avatars", "/local/media", "/local/media/missing", "/local/send", "/local/outbox", "/local/outbox/result",
     "/local/agents",
     "/session/rewind", "/session/rewind/answer", "/session/rewind/cancel",
@@ -5673,6 +5673,13 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import local_settings
 
         ok, detail = local_settings.post(_read_json(h), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/local/members":
+        # The people a phone's Teams chats are with, names only (local_chats.py
+        # post_members, §6.61 "Members"; David's staff list, 28 Nov 2026).
+        from . import local_chats
+
+        ok, detail = local_chats.post_members(_read_json(h), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/local/chats":
         # The phone's companion says which Local chats it carries: ids,

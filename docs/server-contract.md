@@ -14695,6 +14695,17 @@ GET /local/chats → {"ok": true, "names": bool, "chats": [<chat>…]}   // ever
   the whole of that network on that device, so its other chats there get
   `gone` (another device's and another network's are left alone); a gone
   chat sent again comes back, its settings with it.
+- **Members** (28 Nov 2026; David's work staff list, once his Teams moved
+  to the phone: "Have the app send group members too"): `POST /local/members
+  {"network": "teams", "chats": [{"id", "members": [{"name", "id"?}]}]}`
+  from the device that bridges the chats (the app asks the companion's AIDL
+  v10 `getMembers`, leaving out the user and bots). Each chat's list
+  replaces its last on the record (`members`, `members_at`); a chat with no
+  record here, or one another device bridges, is skipped. Names only, and
+  only where names are kept: off (`MEDIA_LOCAL_CHAT_NAMES`, a hosted
+  server) nothing is stored and the answer says `names: false`. Teams only
+  for now; another network is 400 `unknown_network`, any other field 400
+  `field_not_accepted`. Answers `{"ok", "stored", "skipped", "names"}`.
 - **`account`** (21 Nov 2026, sasonica-app mail #1140): the bridge login
   the chat comes through (the companion's `receiver`, and the login's
   name), so another device can hide one account's chats. Echoed as

@@ -357,3 +357,42 @@ def test_a_google_messages_login_with_a_slash_is_taken(server, phone):
     assert st == 200, got
     rec = local_chats.record("local:gmessages:1.18")
     assert rec["name"] == "PHS Therapy" and rec["account"]["id"] == acct["id"]
+
+
+def members(server, token, body):
+    res, obj = call(server, "POST", "/local/members", body, _auth(token))
+    return res.status, obj
+
+
+def test_a_teams_chats_members_are_kept_by_name_on_its_record(server, phone, monkeypatch):
+    """POST /local/members (28 Nov 2026): the staff list's colleagues from the
+    phone's Teams chats, names only, from the device that bridges them."""
+    monkeypatch.delenv("MEDIA_LOCAL_CHAT_NAMES", raising=False)
+    monkeypatch.delenv("MEDIA_HOSTED", raising=False)
+    st, got = post(server, phone["token"], {"network": "teams", "chats": [
+        {"id": "19:abc@thread.v2", "kind": "group", "name": "Spa Therapy"}]})
+    assert st == 200, got
+    st, got = members(server, phone["token"], {"network": "teams", "chats": [
+        {"id": "19:abc@thread.v2", "members": [{"name": "Ann Example", "id": "8:orgid:aaa"}, {"name": "Bo Sample"}]},
+        {"id": "19:unknown@thread.v2", "members": [{"name": "Cy Placeholder"}]}]})
+    assert st == 200 and (got["stored"], got["skipped"], got["names"]) == (1, 1, True), got
+    rec = local_chats.STORE.get("local:teams:19:abc@thread.v2")
+    assert rec["members"] == [{"name": "Ann Example", "id": "8:orgid:aaa"}, {"name": "Bo Sample"}]
+    # Another device's chats are not its to describe.
+    other = _paired(server, name="Tablet")
+    st, got = members(server, other["token"], {"network": "teams", "chats": [
+        {"id": "19:abc@thread.v2", "members": []}]})
+    assert (got["stored"], got["skipped"]) == (0, 1)
+    assert local_chats.STORE.get("local:teams:19:abc@thread.v2")["members"]
+
+
+def test_members_are_refused_off_teams_with_extra_fields_and_without_names(server, phone, monkeypatch):
+    for body in ({"network": "whatsapp", "chats": []},
+                 {"network": "teams", "chats": [{"id": "x", "members": [{"name": "A", "text": "hi"}]}]},
+                 {"network": "teams", "chats": [{"id": "x", "members": "A"}]},
+                 {"network": "teams", "chats": [], "extra": 1}):
+        st, got = members(server, phone["token"], body)
+        assert st == 400, (body, got)
+    monkeypatch.setenv("MEDIA_LOCAL_CHAT_NAMES", "0")
+    st, got = members(server, phone["token"], {"network": "teams", "chats": [{"id": "x", "members": [{"name": "A"}]}]})
+    assert st == 200 and got["names"] is False and got["stored"] == 0
