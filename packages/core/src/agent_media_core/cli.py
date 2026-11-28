@@ -12050,6 +12050,15 @@ def _build_parser() -> argparse.ArgumentParser:
     pe_sub.add_parser("list", help="configured peers and which are paired")
     pe.set_defaults(func=cmd_peer)
 
+    scr = sub.add_parser(
+        "screen",
+        help="pause this computer's media while you talk or a reply is read out",
+        description="The desktop half of Settings → Devices \"Pause what's playing "
+                    "here\" (server-contract §6.21f): pair, run, install at login.")
+    from . import screen_helper as _screen_helper
+    _screen_helper.add_args(scr)
+    scr.set_defaults(func=lambda a: _screen_helper.cmd(a))
+
     au = sub.add_parser("audio",
                         help="agent-media's rendered speech clips on disk")
     asub = au.add_subparsers(dest="audio_cmd", required=True)

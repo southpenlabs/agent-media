@@ -7948,6 +7948,17 @@ a desktop. Code: `screens.py`; tests in `test_screens.py`. Design:
   device's own sasonica audio ... that was the loop"). Windows shows one
   media session per Chrome, so a video in another tab of the same Chrome
   cannot be reached while Sasonica's is the one shown; another app can.
+- **Desktops (28 Nov 2026): `media screen`** (core `screen_helper.py`,
+  also `media-screen`), the generic form of hpo's ducker. `media screen
+  pair '<link>'` pairs the computer (token in
+  `$XDG_STATE_HOME/agent-media/screen.json`, 0600, kind `computer`); switch
+  it on in Settings → Devices; `media screen install` runs it at login (a
+  systemd user unit on Linux, a logon task in the desktop session on
+  Windows). It polls as above and pauses through the `audio_backend` seam
+  (MPRIS, SMTC), skipping players whose artist or album is `Sasonica`
+  (`AudioBackend.own_voice`), resumes only what it paused and is still
+  paused, and plays on if the server is unreachable for 3 s while paused.
+  Mac has no public API for other apps' media: not supported.
 
 ### 6.21g A device that follows a phone (built 3 Nov 2026)
 

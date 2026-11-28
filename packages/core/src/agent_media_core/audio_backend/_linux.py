@@ -28,6 +28,12 @@ class LinuxBackend(AudioBackend):
         from ..route import _mpris
         _mpris.resume_players(names)
 
+    def own_voice(self, name: str) -> bool:
+        from ..route import _mpris
+        meta = _mpris._run("--player", name, "metadata", "--format",
+                           "{{artist}}\t{{album}}") or ""
+        return any(f.strip().lower() == "sasonica" for f in meta.split("\t"))
+
     def default_ao(self) -> Optional[str]:
         return "pulse"
 

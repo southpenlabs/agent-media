@@ -77,6 +77,13 @@ class AudioBackend:
     def resume_players(self, names: list[str]) -> None:
         return None
 
+    def own_voice(self, name: str) -> bool:
+        """Is this player Sasonica's own voice (its media session names its
+        artist or album "Sasonica", sasonica-app webSpeaker.ts)? A device that
+        pauses for speech never pauses the reply itself (server-contract
+        §6.21f, "Never the assistant's own audio")."""
+        return False
+
     def default_ao(self) -> Optional[str]:
         """mpv `--ao` when none is configured. None = let mpv choose."""
         return None

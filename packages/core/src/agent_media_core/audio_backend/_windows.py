@@ -179,6 +179,20 @@ class WindowsBackend(AudioBackend):
         if paused:
             log.debug("smtc: paused %s", paused)
 
+    def own_voice(self, name: str) -> bool:
+        with self._lock:
+            s = self._seen.get(name)
+        s = s or self._lookup(name)
+        if s is None:
+            return False
+        try:
+            props = _wait(s.try_get_media_properties_async())
+            fields = (str(props.artist or ""), str(props.album_title or ""))
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
+            return False
+        return any(f.strip().lower() == "sasonica" for f in fields)
+
     def resume_players(self, names: list[str]) -> None:
         resumed = []
         for name in names:
