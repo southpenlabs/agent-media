@@ -122,10 +122,11 @@ def test_spotify_sign_in_and_read(monkeypatch):
             return {"items": [{"track": {"name": "Teardrop", "artists": [{"name": "Massive Attack"}]}}]}
         raise AssertionError(url)
     monkeypatch.setattr(A, "_http", http)
+    monkeypatch.setenv("MEDIA_PUBLIC_URL", "https://sasonica.example")
     url = A.spotify_begin(now=100.0)
     q = urllib.parse.parse_qs(url.partition("?")[2])
     assert q["client_id"] == [CID] and q["code_challenge_method"] == ["S256"]
-    assert q["redirect_uri"] == ["https://red5.sasonica.com/accounts/spotify/callback"]
+    assert q["redirect_uri"] == ["https://sasonica.example/accounts/spotify/callback"]
     with pytest.raises(ValueError):
         A.spotify_finish("c", "wrong", now=110.0)
     assert A.spotify_finish("c", q["state"][0], now=110.0) == {"user": "David"}

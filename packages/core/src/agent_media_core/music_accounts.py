@@ -171,7 +171,9 @@ def spotify_redirect() -> str:
     v = (os.environ.get("MEDIA_SPOTIFY_REDIRECT") or "").strip()
     if v:
         return v
-    base = (os.environ.get("MEDIA_PUBLIC_URL") or "https://red5.sasonica.com").strip().rstrip("/")
+    # The server's own address; no host is assumed (it said red5 until 28 Nov
+    # 2026, after the server had moved to red2).
+    base = (os.environ.get("MEDIA_PUBLIC_URL") or "").strip().rstrip("/")
     return f"{base}/accounts/spotify/callback"
 
 
