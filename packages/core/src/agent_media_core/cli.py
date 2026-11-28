@@ -10985,6 +10985,34 @@ def cmd_doctor(a) -> int:
         if bad and "local" not in unhealthy:
             unhealthy.append("local")
 
+    # Devices set to pause for speech that stopped asking, or whose desktop
+    # helper stopped updating (agent_media_server.screens; David, 28 Nov
+    # 2026: hpo's old ducker was dead two weeks and nothing said so).
+    try:
+        from agent_media_server import screens as _screens
+    except ImportError:
+        _screens = None
+    if _screens is not None:
+        try:
+            for bad, line in _screens.doctor_lines():
+                print(f"pause: {'✗ ' if bad else ''}{line}")
+                if bad and "local" not in unhealthy:
+                    unhealthy.append("local")
+        except Exception as _exc:  # noqa: BLE001 — a line of the report, never a failed doctor
+            _failures.swallowed(_exc)
+
+    # This machine's env file: lines a shell cannot source as plain settings
+    # (the service run scripts `.` it; systemd reads it too). 28 Nov 2026: the
+    # server's start logged "agent-media.env: 1: not found" for three of them.
+    try:
+        from .intake._env import env_file_problems
+        for line in env_file_problems():
+            print(f"env: ✗ {line}")
+            if "local" not in unhealthy:
+                unhealthy.append("local")
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
+
     # Replies refused because no device holds the speech stream
     # (speech_reach; 25 Nov 2026 every reply went unheard, said nowhere).
     try:

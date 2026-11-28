@@ -202,3 +202,33 @@ def test_pause_switch_is_an_admins(server):
         assert res.status == 400
     res, _ = call(server, "POST", "/devices/pause", {"id": "d_nope", "on": True}, admin_h)
     assert res.status == 404
+
+
+def test_check_ins_feed_the_doctor(rig, monkeypatch):
+    """28 Nov 2026: hpo's old ducker was dead two weeks and nothing said so."""
+    screens._SEEN.clear()
+    screens._SEEN_WRITTEN.clear()
+    tv = rig["tv"]
+    now = 1_000_000.0
+    assert any("has not asked" in l for _, l in screens.doctor_lines(now, ("v2", now)))
+    screens._check_in(tv, "v1", now)
+    assert screens.doctor_lines(now + 5, ("v1", now)) == []
+    lines = screens.doctor_lines(now + screens.QUIET_S + 1, ("v1", now))
+    assert lines and not lines[0][0] and "last asked" in lines[0][1]   # a line, not a fault
+    # Behind the version handed out for longer than an update takes: a fault.
+    bad = screens.doctor_lines(now + 60, ("v2", now - screens.BEHIND_S))
+    assert bad == [(True, bad[0][1])] and "self-update" in bad[0][1]
+    assert screens.doctor_lines(now + 60, ("v2", now)) == []   # just released: give it time
+
+
+def test_check_ins_are_written_at_most_once_a_minute(rig):
+    import json
+    screens._SEEN.clear()
+    screens._SEEN_WRITTEN.clear()
+    screens._check_in("d1", "v1", 1000.0)
+    screens._check_in("d1", "v1", 1030.0)
+    assert json.loads(screens.seen_path().read_text())["d1"]["at"] == 1000.0
+    screens._check_in("d1", "v2", 1031.0)     # a new version is written at once
+    assert json.loads(screens.seen_path().read_text())["d1"]["helper"] == "v2"
+    screens._check_in("d1", "", 1100.0)       # an app that names no version keeps the last
+    assert json.loads(screens.seen_path().read_text())["d1"] == {"at": 1100.0, "helper": "v2"}

@@ -115,13 +115,104 @@ def _long(state: dict) -> bool:
         return False
 
 
-def now(bearer: str, state: dict) -> tuple[bool, dict]:
+# --- check-ins, for media doctor ------------------------------------------
+#
+# David, 28 Nov 2026 ("should that be part of agent media's doctor?"): hpo's
+# old ducker was dead for two weeks and nothing said so. Every ask is a
+# check-in; the desktop helper also names its version (X-Screen-Helper). Kept
+# in <state>/screens-seen.json, written at most once a minute per device or
+# when the version changes, so `media doctor` (another process) can read it.
+
+SEEN_WRITE_S = 60.0
+#: A pause device quiet this long is reported (asleep, or its helper stopped).
+QUIET_S = 600.0
+#: A helper this long behind the version the server hands out is not updating
+#: (it checks every 6 h).
+BEHIND_S = 8 * 3600.0
+_SEEN: dict[str, dict] = {}
+_SEEN_WRITTEN: dict[str, float] = {}
+
+
+def seen_path():
+    return devices._dir() / "screens-seen.json"
+
+
+def _check_in(me: str, helper: str, now: float | None = None) -> None:
+    t = time.time() if now is None else now
+    with _LOCK:
+        prev = _SEEN.get(me) or {}
+        rec = {"at": round(t, 1), "helper": helper or prev.get("helper") or None}
+        _SEEN[me] = rec
+        if t - _SEEN_WRITTEN.get(me, 0.0) < SEEN_WRITE_S and rec["helper"] == prev.get("helper"):
+            return
+        _SEEN_WRITTEN[me] = t
+        try:
+            path = seen_path()
+            try:
+                disk = json.loads(path.read_text())
+            except (OSError, ValueError):
+                disk = {}
+            disk = {**(disk if isinstance(disk, dict) else {}), me: rec}
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(disk))
+            tmp.replace(path)
+        except OSError:
+            pass
+
+
+def doctor_lines(now: float | None = None, latest: tuple[str, float] | None = None) -> list[tuple[bool, str]]:
+    """`(bad, line)` for each device with "Pause what's playing here" on:
+    never asked, quiet for QUIET_S (a line, not a fault: a laptop sleeps),
+    or a helper BEHIND_S behind the version handed out (a fault: its
+    self-update is not working). `latest` is (version, since) of the
+    helper the server hands out, from screen_dist."""
+    t = time.time() if now is None else now
+    try:
+        seen = json.loads(seen_path().read_text())
+    except (OSError, ValueError):
+        seen = {}
+    if latest is None:
+        from . import screen_dist
+        latest = screen_dist.latest()
+    out: list[tuple[bool, str]] = []
+    for d in devices.list_devices():
+        if not d.get("pause_here"):
+            continue
+        name = d.get("name") or d.get("id")
+        rec = seen.get(d.get("id")) if isinstance(seen, dict) else None
+        if not rec:
+            out.append((False, f"pause device {name!r}: has not asked since checks were kept "
+                               "(an app or helper that never runs?)"))
+            continue
+        quiet = t - float(rec.get("at") or 0)
+        if quiet >= QUIET_S:
+            out.append((False, f"pause device {name!r}: last asked {_ago(quiet)} ago "
+                               "(asleep, or its helper stopped)"))
+        helper = rec.get("helper")
+        if helper and latest and helper not in ("unknown", latest[0]) and t - latest[1] >= BEHIND_S:
+            out.append((True, f"pause device {name!r}: helper {helper} is behind {latest[0]} "
+                              f"for {_ago(t - latest[1])}: its self-update is not working "
+                              "(on it: media screen update)"))
+    return out
+
+
+def _ago(s: float) -> str:
+    if s < 3600:
+        return f"{s / 60:.0f} min"
+    if s < 172800:
+        return f"{s / 3600:.0f} h"
+    return f"{s / 86400:.0f} days"
+
+
+def now(bearer: str, state: dict, helper: str = "") -> tuple[bool, dict]:
     """`GET /screen/now` → `{on, pause, why}`: whether the asking device
-    should be paused now. `state` is the speech snapshot (/speech/now's)."""
+    should be paused now. `state` is the speech snapshot (/speech/now's);
+    `helper` the desktop helper's version (its X-Screen-Helper header)."""
     user, err = auth.gate(bearer)
     me = auth.device_id(bearer) if user else ""
     if not me:
         return False, err or {"status": 401, "error": "a paired device only"}
+    _check_in(me, helper[:40])
     rows = {d.get("id"): d for d in devices.list_devices()}
     screen = rows.get(me) or {}
     if not screen.get("pause_here"):

@@ -87,8 +87,9 @@ class ScreenError(RuntimeError):
 
 
 def _http(url: str, body: Optional[dict] = None, token: str = "",
-          timeout: float = 4.0, method: str = "") -> tuple[int, dict]:
-    headers = {"User-Agent": UA, "Accept": "application/json"}
+          timeout: float = 4.0, method: str = "",
+          extra: Optional[dict] = None) -> tuple[int, dict]:
+    headers = {"User-Agent": UA, "Accept": "application/json", **(extra or {})}
     data = None
     if body is not None:
         data = json.dumps(body).encode()
@@ -140,7 +141,9 @@ def pair(link: str, server: str = "", name: str = "") -> dict:
 
 def ask(rec: dict) -> dict:
     """The server's `GET /screen/now` for this device: {on, pause, why}."""
-    status, got = _http(rec["url"] + "/screen/now", token=rec["token"])
+    # The version rides along, so media doctor can say when a helper stops updating.
+    status, got = _http(rec["url"] + "/screen/now", token=rec["token"],
+                        extra={"X-Screen-Helper": installed_version() or "unknown"})
     if status != 200 or not got.get("ok", True):
         raise ScreenError(f"/screen/now said {status}: {got.get('error') or got}")
     return got

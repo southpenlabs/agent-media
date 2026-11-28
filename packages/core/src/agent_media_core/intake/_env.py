@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -162,3 +163,45 @@ def load_env_file(label: str = "hook") -> None:
         if not path:
             continue
         _load_one(path, label, off)
+
+
+_ENV_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+#: Unquoted, these make a shell that sources the file run part of a value.
+_SHELL_BREAKS = " \t|&;<>()`"
+
+
+def env_file_problems(path: "str | Path | None" = None) -> list[str]:
+    """Lines of the machine's env file that a shell cannot source as plain
+    settings, for media doctor. The services' run scripts `.` the file and
+    systemd reads it as an EnvironmentFile; a value with an unquoted space or
+    `|` reads right to systemd but runs a command in the shell (28 Nov 2026:
+    `X=a|1` ran `1`, `X=systemctl --user ...` ran `--user`), and an `export`
+    line is one systemd skips."""
+    p = Path(path) if path else Path.home() / ".config" / "agent-media.env"
+    try:
+        lines = p.read_text().splitlines()
+    except OSError:
+        return []
+    out = []
+    for n, raw in enumerate(lines, 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            name = line[7:].split("=", 1)[0].strip()
+            out.append(f"{p.name} line {n}: `export {name}=…`: systemd skips the line, so "
+                       f"a service never gets {name}; drop the `export`")
+            continue
+        m = _ENV_LINE.match(line)
+        if not m:
+            out.append(f"{p.name} line {n}: not NAME=value")
+            continue
+        name, value = m.groups()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            continue
+        bad = sorted({c for c in value if c in _SHELL_BREAKS})
+        if bad:
+            shown = " ".join("space" if c == " " else "tab" if c == "\t" else c for c in bad)
+            out.append(f"{p.name} line {n}: {name}'s value has {shown} unquoted: a shell "
+                       f"sourcing the file runs part of it; put it in single quotes")
+    return out

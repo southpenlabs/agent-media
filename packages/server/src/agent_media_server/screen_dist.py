@@ -92,6 +92,20 @@ def wheel(root: Optional[Path] = None, cache: Optional[Path] = None,
                 "size": len(data)}
 
 
+def latest(cache: Optional[Path] = None) -> Optional[tuple[str, float]]:
+    """(version, since) of the newest helper built here, from its folder;
+    None before any was asked for. For media doctor (another process)."""
+    cache = cache or _cache_dir()
+    try:
+        dirs = [d for d in cache.iterdir() if d.is_dir() and not d.name.startswith(".")]
+    except OSError:
+        return None
+    if not dirs:
+        return None
+    d = max(dirs, key=lambda p: p.stat().st_mtime)
+    return d.name, d.stat().st_mtime
+
+
 def info(bearer: str, **kw) -> tuple[bool, dict]:
     """`GET /screen/helper`."""
     user, err = auth.gate(bearer)

@@ -3472,7 +3472,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # switch, a phone's mic or a voice, the phone at home.
         from . import screens
 
-        ok, detail = screens.now(_bearer(h), speech.current_state())
+        ok, detail = screens.now(_bearer(h), speech.current_state(),
+                                 h.headers.get("X-Screen-Helper") or "")
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path in ("/screen/helper", "/screen/helper/wheel"):
         # The desktop pause helper's updates (screen_dist.py): the version
