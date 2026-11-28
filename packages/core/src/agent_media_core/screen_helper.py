@@ -382,10 +382,73 @@ def check_update(rec: dict, run_cmd: Callable[..., subprocess.CompletedProcess] 
 def _start_again() -> None:
     """Hand over to a fresh process of the new code. Linux: systemd's
     Restart=always does it once this one exits. Windows: start one, detached,
-    in this desktop session."""
+    in this desktop session, through the launcher when there is one."""
     if os.name == "nt":
-        subprocess.Popen(_self_cmd(windowless=True) + ["run"],
-                         creationflags=_DETACHED | _NO_WINDOW, close_fds=True)
+        cmd = _launch_cmd(windowless=True) if launcher_path().exists() \
+            else _self_cmd(windowless=True) + ["run"]
+        subprocess.Popen(cmd, creationflags=_DETACHED | _NO_WINDOW, close_fds=True)
+
+
+# --- the launcher (agent-mail #1449) --------------------------------------
+#
+# The task or unit runs screen-launch.py, a copy of screen_launch.py kept
+# beside screen.json, outside the install it heals: it checks the install
+# against its RECORD, runs `… screen_helper run`, and reinstalls the
+# server's wheel when a start fails (screen_launch.py says how).
+
+def launcher_path() -> Path:
+    return conf_path().with_name("screen-launch.py")
+
+
+def ensure_launcher() -> bool:
+    """Write (or refresh) the launcher copy; True when it changed."""
+    src = Path(__file__).with_name("screen_launch.py").read_text(encoding="utf-8")
+    dest = launcher_path()
+    try:
+        if dest.read_text(encoding="utf-8") == src:
+            return False
+    except OSError:
+        pass
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    tmp.write_text(src, encoding="utf-8")
+    os.replace(tmp, dest)
+    return True
+
+
+def _launch_cmd(windowless: bool = False) -> list[str]:
+    return [_self_cmd(windowless)[0], str(launcher_path())]
+
+
+def migrate_to_launcher(run_cmd: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> str:
+    """An install from before the launcher: its task or unit pointed at the
+    launcher, without starting anything (this process is the one running).
+    "" when nothing was done, else what was."""
+    ensure_launcher()
+    name = launcher_path().name
+    if sys.platform.startswith("linux"):
+        unit = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd" / "user" / UNIT
+        try:
+            text = unit.read_text()
+        except OSError:
+            return ""
+        if name in text:
+            return ""
+        unit.write_text(_linux_unit(_launch_cmd()))
+        run_cmd(["systemctl", "--user", "daemon-reload"], check=False)
+        return f"{UNIT} now starts through {name}"
+    if os.name == "nt":
+        q = run_cmd(["schtasks", "/query", "/tn", TASK, "/xml"], capture_output=True, text=True,
+                    creationflags=_NO_WINDOW)
+        if q.returncode != 0 or name in (q.stdout or ""):
+            return ""
+        cmd = subprocess.list2cmdline(_launch_cmd(windowless=True))
+        run_cmd(["schtasks", "/create", "/tn", TASK, "/tr", cmd, "/sc", "onlogon", "/it",
+                 "/rl", "limited", "/f"], check=False, creationflags=_NO_WINDOW)
+        run_cmd(["powershell", "-NoProfile", "-Command", _TASK_SETTINGS], check=False,
+                creationflags=_NO_WINDOW)
+        return f"task {TASK!r} now starts through {name}"
+    return ""
 
 
 def run(rec: dict, backend=None, sleep: Callable[[float], None] = time.sleep,
@@ -473,12 +536,15 @@ def run(rec: dict, backend=None, sleep: Callable[[float], None] = time.sleep,
 # --- run at login -------------------------------------------------------
 
 def _linux_unit(exe: list[str]) -> str:
+    """The user unit; `exe` the launcher's command (or, as before it, the
+    module's, to which ` run` is added)."""
+    cmd = " ".join(exe) if exe[-1].endswith(".py") else " ".join(exe) + " run"
     return f"""[Unit]
 Description=Sasonica: pause this computer's media while you talk or a reply is read
 After=graphical-session.target network-online.target
 
 [Service]
-ExecStart={' '.join(exe)} run
+ExecStart={cmd}
 Restart=always
 RestartSec=5
 
@@ -508,20 +574,22 @@ _TASK_SETTINGS = (
 def install(dry_run: bool = False) -> str:
     if sys.platform.startswith("linux"):
         unit_dir = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd" / "user"
-        text = _linux_unit(_self_cmd())
+        text = _linux_unit(_launch_cmd())
         if dry_run:
             return f"would write {unit_dir / UNIT}:\n{text}"
+        ensure_launcher()
         unit_dir.mkdir(parents=True, exist_ok=True)
         (unit_dir / UNIT).write_text(text)
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
         subprocess.run(["systemctl", "--user", "enable", "--now", UNIT], check=False)
         return f"installed and started {UNIT}"
     if os.name == "nt":
-        cmd = subprocess.list2cmdline(_self_cmd(windowless=True) + ["run"])
+        cmd = subprocess.list2cmdline(_launch_cmd(windowless=True))
         create = ["schtasks", "/create", "/tn", TASK, "/tr", cmd, "/sc", "onlogon",
                   "/it", "/rl", "limited", "/f"]
         if dry_run:
             return "would run: " + subprocess.list2cmdline(create)
+        ensure_launcher()
         subprocess.run(create, check=True)
         # schtasks leaves Windows' defaults: stopped after 72 hours, never run
         # on battery (a laptop unplugged), never started again after a crash.
@@ -598,6 +666,14 @@ def cmd(a) -> int:
     stream = sys.stderr if sys.stderr is not None else open(  # noqa: SIM115
         conf_path().with_name("screen.log"), "a", buffering=1, encoding="utf-8")
     logs.setup(stream=stream, fmt="%(asctime)s " + logs.DEFAULT_FORMAT)
+    if not a.once and may_update():
+        # An install from before the launcher moves onto it (agent-mail #1449).
+        try:
+            done = migrate_to_launcher()
+            if done:
+                log.info("%s", done)
+        except Exception as e:  # noqa: BLE001 - never stops the loop starting
+            _failures.swallowed(e)
     return run(conf, once=a.once)
 
 

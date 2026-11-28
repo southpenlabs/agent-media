@@ -60,6 +60,8 @@ def rig(monkeypatch):
                 r["last_ip"], r["last_seen"] = seen[r["id"]], time.time()
         return rows
     monkeypatch.setattr(devices, "list_devices", listed)
+    # Never this machine's tailnet: red2's has a "Living Room TV" node.
+    monkeypatch.setattr(screens, "_tailnet_status", lambda: {})
     monkeypatch.setattr(speech_frames, "playing_device", lambda ch="speech": phone)
     clock = Clock()
     monkeypatch.setattr(screens.time, "monotonic", clock)
@@ -244,3 +246,40 @@ def test_check_ins_are_written_at_most_once_a_minute(rig):
     assert json.loads(screens.seen_path().read_text())["d1"]["helper"] == "v2"
     screens._check_in("d1", "", 1100.0)       # an app that names no version keeps the last
     assert json.loads(screens.seen_path().read_text())["d1"] == {"at": 1100.0, "helper": "v2"}
+
+
+def test_a_computer_that_is_on_with_a_silent_helper_is_a_fault(rig):
+    """agent-mail #1449: hpo came back from a crash, its helper failed on
+    every start, and the doctor said "asleep". On the tailnet, or another of
+    its devices seen, after the helper went quiet: broken, not asleep."""
+    screens._SEEN.clear()
+    screens._SEEN_WRITTEN.clear()
+    t0 = 1_000_000.0
+    screens._check_in(rig["tv"], "v1", t0)
+    later = t0 + 3600
+    dev = {"id": rig["tv"], "name": "hpo screen", "last_ip": "100.70.1.2"}
+    online = lambda: {"Peer": {"k": {"HostName": "HPO", "TailscaleIPs": ["100.70.1.9"],  # noqa: E731
+                                     "Online": True}}}
+    assert "online on the tailnet" in screens.computer_on(dev, t0, later, tailnet=online, rows=[])
+    seen = lambda: {"Peer": {"k": {"HostName": "x", "TailscaleIPs": ["100.70.1.2"],  # noqa: E731
+                                   "Online": False, "LastSeen": "1970-01-12T14:00:00Z"}}}
+    assert "was on the tailnet" in screens.computer_on(dev, t0, later, tailnet=seen, rows=[])
+    # Off: the node was last seen before the helper went quiet, nothing else of it seen.
+    off = lambda: {"Peer": {"k": {"HostName": "hpo", "TailscaleIPs": ["100.70.1.2"],  # noqa: E731
+                                  "Online": False, "LastSeen": "1970-01-12T13:46:40Z"}}}
+    assert screens.computer_on(dev, t0, later, tailnet=off, rows=[]) == ""
+    # Another of its devices seen since: on.
+    rows = [{"id": "d_jobs", "name": "hpo jobs", "last_seen": later - 60}]
+    assert "'hpo jobs' was seen" in screens.computer_on(dev, t0, later, tailnet=dict, rows=rows)
+    # A phone on the same home address is no evidence.
+    home = {"id": rig["tv"], "name": "hpo screen", "last_ip": "203.0.113.5"}
+    rows = [{"id": "d_ph", "name": "Pixel", "last_ip": "203.0.113.5", "last_seen": later}]
+    assert screens.computer_on(home, t0, later, tailnet=dict, rows=rows) == ""
+    # And the doctor makes it a fault.
+    real = screens.computer_on
+    try:
+        screens.computer_on = lambda d, a, n, tailnet=None, rows=None: "hpo is online on the tailnet"
+        bad = screens.doctor_lines(later, ("v1", t0))
+        assert bad and bad[0][0] and "helper is not running" in bad[0][1]
+    finally:
+        screens.computer_on = real

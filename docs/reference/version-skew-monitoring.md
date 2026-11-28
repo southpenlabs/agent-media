@@ -243,7 +243,8 @@ line marks the host unhealthy (the status bar's ⚠); a plain line is a note.
 
 | Line | ✗ when | Note when | From |
 |---|---|---|---|
-| `pause:` | a desktop pause helper still asks on an old version 8 h after the new one came out (its self-update is broken) | a device with Pause what's playing here has been quiet 10 min, or never asked. A computer left off for a week is only ever a note | `screens.doctor_lines`, check-ins in `screens-seen.json` |
+| `pause:` | a desktop pause helper still asks on an old version 8 h after the new one came out (its self-update is broken); or it has been quiet 10 min while its computer is seen to be on: its tailnet node online or seen since, by address or by the first word of the device's name (`hpo screen` → hpo), or another device of that name (`hpo jobs`) seen since (agent-mail #1449) | a device with Pause what's playing here has been quiet 10 min with nothing to say its computer is on, or never asked. A computer left off for a week is only ever a note | `screens.doctor_lines`, `screens.computer_on`, check-ins in `screens-seen.json` |
+| `update:` | this server's self-update timer has not run for 4 h; with `MEDIA_SELF_UPDATE=on`, a release the channel has had for a day (counted from the first check that reached the channel and saw it) still not taken, with why (never quiet, stepped back, failed); the channel unreachable for 3 days; agent-mail's checkout a day behind | behind, on a host that updates by hand (`check`); the channel unreachable for less than 3 days (offline, not stuck); self-update off | `self_update.doctor_lines`, `<state>/agent-media/self-update.json` (agent-mail #1447) |
 | `env:` | a line of `agent-media.env` a shell can't source (`export`, an unquoted space or `\|`) | | `intake/_env.env_file_problems` |
 | `restart:` | a reply picked up after a restart did not play (in the last day) | | `health_log` `restart_pickup` |
 | `heard:` | | three or more replays in a day the phone never confirmed | `health_log` `heard_unconfirmed` |
@@ -251,7 +252,16 @@ line marks the host unhealthy (the status bar's ⚠); a plain line is a note.
 | `app:` | | a phone's app is behind the newest CI build that has been out over a day | `app_update.builds()` |
 
 Code: `cli._doctor_quiet_failures`, `agent_media_server.screens`,
-`health_log.py`.
+`health_log.py`, `self_update.py`.
+
+A pause helper that cannot start heals itself: its task or unit runs
+`screen-launch.py` (a copy of `screen_launch.py` beside `screen.json`,
+standard library only), which checks the install against its RECORD hashes,
+and when a file is damaged or the helper fails within a minute of starting,
+reinstalls the paired server's wheel (at most once an hour) and tries once
+more, saying so in `screen.log`. An install from before it moves onto it at
+its next start (agent-mail #1449: hpo's crash zero-filled a module and every
+start failed on import).
 
 ## Acting on the warning: `media doctor --fix`
 

@@ -177,7 +177,80 @@ def _check_in(me: str, helper: str, now: float | None = None) -> None:
             pass
 
 
-def doctor_lines(now: float | None = None, latest: tuple[str, float] | None = None) -> list[tuple[bool, str]]:
+def _first_word(name) -> str:
+    """A device's or host's first word, lower case: "hpo screen" → "hpo"."""
+    import re
+
+    words = re.split(r"[^a-z0-9]+", str(name or "").lower())
+    return next((w for w in words if w), "")
+
+
+def _tailnet_status() -> dict:
+    try:
+        out = subprocess.run(["tailscale", "status", "--json"], capture_output=True,
+                             text=True, timeout=5).stdout
+        data = json.loads(out or "{}")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _iso_ts(v) -> float:
+    from datetime import datetime
+
+    try:
+        ts = datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+    return ts if ts > 0 else 0.0
+
+
+def _in_tailnet(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip) in _TAILNET
+    except ValueError:
+        return False
+
+
+def computer_on(dev: dict, asked_at: float, now: float, *, tailnet=None,
+                rows: list[dict] | None = None) -> str:
+    """Why the computer a quiet pause device runs on is seen to be on since it
+    last asked, or "" when nothing says so (asleep or off): its tailnet node
+    online (or seen) after the ask, by its address or by the host its name
+    starts with ("hpo screen" → hpo), or another of its devices (the same
+    first word, or the same tailnet address) seen after the ask. Something must be
+    seen at least QUIET_S after the last ask, so a computer that just went
+    to sleep is not called on."""
+    after = asked_at + QUIET_S
+    host = _first_word(dev.get("name"))
+    ip = str(dev.get("last_ip") or "")
+    data = (tailnet or _tailnet_status)()
+    for p in (data.get("Peer") or {}).values() if isinstance(data, dict) else []:
+        ips = [str(x) for x in p.get("TailscaleIPs") or []]
+        names = {_first_word(p.get("HostName")),
+                 _first_word(str(p.get("DNSName") or "").split(".")[0])}
+        if not ((ip and ip in ips) or (host and host in names)):
+            continue
+        if p.get("Online") and now >= after:
+            return f"{p.get('HostName') or host} is online on the tailnet"
+        seen = _iso_ts(p.get("LastSeen"))
+        if seen >= after:
+            return f"{p.get('HostName') or host} was on the tailnet {_ago(now - seen)} ago"
+    for o in (devices.list_devices() if rows is None else rows):
+        if o.get("id") == dev.get("id"):
+            continue
+        # The same address counts only on the tailnet (one per node): at home
+        # every device shares the router's public one.
+        same = (host and _first_word(o.get("name")) == host) or (
+            ip and o.get("last_ip") == ip and _in_tailnet(ip))
+        seen = float(o.get("last_seen") or 0)
+        if same and seen >= after:
+            return f"{o.get('name') or o.get('id')!r} was seen {_ago(now - seen)} ago"
+    return ""
+
+
+def doctor_lines(now: float | None = None, latest: tuple[str, float] | None = None,
+                 tailnet=None) -> list[tuple[bool, str]]:
     """`(bad, line)` for each device with "Pause what's playing here" on:
     never asked, quiet for QUIET_S (a line, not a fault: a laptop sleeps),
     or a helper BEHIND_S behind the version handed out (a fault: its
@@ -203,8 +276,18 @@ def doctor_lines(now: float | None = None, latest: tuple[str, float] | None = No
             continue
         quiet = t - float(rec.get("at") or 0)
         if quiet >= QUIET_S:
-            out.append((False, f"pause device {name!r}: last asked {_ago(quiet)} ago "
-                               "(asleep, or its helper stopped)"))
+            on = computer_on(d, float(rec.get("at") or 0), t, tailnet=tailnet)
+            if on:
+                # The computer is up and its helper is not asking: broken, not
+                # asleep (agent-mail #1449: hpo's install was corrupted by a
+                # crash, every start failed on import, and this said "asleep").
+                out.append((True, f"pause device {name!r}: last asked {_ago(quiet)} ago, but "
+                                  f"the computer is on ({on}): its helper is not running "
+                                  "(on it: screen.log beside screen.json; media screen run "
+                                  "shows why)"))
+            else:
+                out.append((False, f"pause device {name!r}: last asked {_ago(quiet)} ago "
+                                   "(asleep or off, as far as can be seen)"))
         helper = rec.get("helper")
         # Behind only counts while it runs: asking BEHIND_S after the new
         # version came out and still on the old one. A computer left off for
